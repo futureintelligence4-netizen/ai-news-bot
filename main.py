@@ -8,7 +8,7 @@ from datetime import datetime
 
 import feedparser
 import edge_tts
-from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip, vfx
+from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip
 from PIL import Image, ImageDraw, ImageFont
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -33,15 +33,38 @@ SFX_TRANSITION = "sfx_whoosh.mp3"
 USED_FILE = "used_articles.txt"
 
 # ----------------------------------------------------------------------
-# 1. FETCH AI NEWS
+# 1. FETCH AI NEWS & SCORE BY PRIORITY
 # ----------------------------------------------------------------------
+def score_article(article):
+    """Scores articles based on high-priority AI keywords."""
+    score = 10
+    text = (article['title'] + " " + article['summary']).lower()
+    
+    # High priority keywords
+    high_priority = ["openai", "chatgpt", "anthropic", "gemini", "google", "apple", "microsoft", "meta", "nvidia", "breakthrough", "billion", "funding", "launches", "gpt-4", "agi"]
+    for kw in high_priority:
+        if kw in text:
+            score += 5
+            
+    # Medium priority keywords
+    med_priority = ["ai", "machine learning", "robot", "model", "tech", "data", "automation", "cybersecurity"]
+    for kw in med_priority:
+        if kw in text:
+            score += 2
+            
+    # Penalize very short summaries (usually junk or paywalls)
+    if len(article['summary']) < 100:
+        score -= 3
+        
+    return score
+
 def fetch_ai_news():
-    print(f"📰 Fetching AI news to find {NUM_STORIES} stories...")
+    print(f"📰 Fetching AI news to find the top {NUM_STORIES} priority stories...")
     all_articles = []
     for url in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
-            for article in feed.entries[:20]:
+            for article in feed.entries[:30]: # Fetch more to have a bigger pool to score
                 title = article.title.strip()
                 summary = ""
                 if 'summary' in article:
@@ -60,15 +83,22 @@ def fetch_ai_news():
     if not fresh:
         fresh = all_articles
 
+    # Score and sort the fresh articles
+    for article in fresh:
+        article['score'] = score_article(article)
+        
+    fresh.sort(key=lambda x: x['score'], reverse=True) # Sort highest score first
+
+    # Pick the Top 5
     num_to_select = min(NUM_STORIES, len(fresh))
-    chosen = random.sample(fresh, num_to_select)
+    chosen = fresh[:num_to_select]
     
     for story in chosen:
         save_used_article(story["title"])
         
-    print(f"✅ Selected {len(chosen)} stories!")
+    print(f"✅ Selected Top {len(chosen)} Priority Stories!")
     for i, story in enumerate(chosen):
-        print(f"   {i+1}. {story['title']}")
+        print(f"   {i+1}. [Score: {story['score']}] {story['title']}")
     return chosen
 
 def load_used_articles():
@@ -203,44 +233,51 @@ def create_thumbnail(stories, output_path="thumbnail.jpg"):
     print("✅ Thumbnail saved.")
 
 # ----------------------------------------------------------------------
-# 4. BUILD FINAL VIDEO (WITH PPT CROSSFADE EFFECT)
+# 4. BUILD FINAL VIDEO (WITH DYNAMIC BACKGROUNDS & PPT CROSSFADE)
 # ----------------------------------------------------------------------
 def build_video(stories, voiceover_path, output_path="final_video.mp4"):
     print("🎬 Building silent video with MoviePy...")
     
     bg_files = glob.glob("*.mp4") + glob.glob("assets/*.mp4")
+    if not bg_files:
+        raise Exception("No .mp4 files found anywhere in the repo!")
     
-    try:
-        if bg_files:
-            bg_path = random.choice(bg_files)
-            print(f"🎥 Using background video: {bg_path}")
-            bg = VideoFileClip(bg_path).without_audio()
-            bg = bg.crop(x_center=bg.w / 2, width=1080, height=1920)
-            bg = bg.loop(duration=120).set_duration(120)
-        else:
-            raise Exception("No video file found")
-    except Exception as e:
-        print(f"⚠️ Background video missing or corrupted. Using solid color background. Error: {e}")
-        bg = ColorClip(size=(1080, 1920), color=(15, 15, 25), duration=120)
-
-    overlay_clips = []
     segment_duration = 120 / len(stories)
     
+    bg_clips = []
+    overlay_clips = []
+    
     for i, story in enumerate(stories):
+        # 1. Pick a random background for THIS story
+        bg_path = random.choice(bg_files)
+        print(f"🎥 News {i+1} using background: {bg_path}")
+        
+        try:
+            bg_segment = VideoFileClip(bg_path).without_audio()
+            bg_segment = bg_segment.crop(x_center=bg_segment.w / 2, width=1080, height=1920)
+            # Loop if too short, cut if too long
+            if bg_segment.duration < segment_duration:
+                bg_segment = bg_segment.loop(duration=segment_duration)
+            bg_segment = bg_segment.subclip(0, segment_duration).set_start(i * segment_duration)
+        except Exception as e:
+            print(f"⚠️ Background video failed. Using solid color. Error: {e}")
+            bg_segment = ColorClip(size=(1080, 1920), color=(15, 15, 25), duration=segment_duration).set_start(i * segment_duration)
+            
+        bg_clips.append(bg_segment)
+        
+        # 2. Create overlay with PPT crossfade
         overlay_path = f"overlay_{i}.png"
         create_overlay(story["title"], i+1, overlay_path)
         
-        # To crossfade, the clip needs to overlap the previous one by 1 second
         clip_duration = segment_duration + 1.0 if i < len(stories) - 1 else segment_duration
         clip = ImageClip(overlay_path).set_duration(clip_duration).set_start(i * segment_duration)
         
-        # Add the PPT Crossfade effect (1 second smooth dissolve) for all stories after the first one
         if i > 0:
             clip = clip.crossfadein(1.0)
             
         overlay_clips.append(clip)
 
-    final = CompositeVideoClip([bg] + overlay_clips, size=(1080, 1920)).set_duration(120)
+    final = CompositeVideoClip(bg_clips + overlay_clips, size=(1080, 1920)).set_duration(120)
 
     final.write_videofile(
         "silent_video.mp4",
@@ -295,7 +332,7 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
             os.remove(f)
 
 # ----------------------------------------------------------------------
-# 5. UPLOAD TO YOUTUBE (WITH THUMBNAIL)
+# 5. UPLOAD TO YOUTUBE
 # ----------------------------------------------------------------------
 def upload_to_youtube(video_path, thumb_path, title, description, tags):
     print("📤 Uploading to YouTube...")
