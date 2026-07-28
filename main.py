@@ -4,11 +4,13 @@ import random
 import json
 import glob
 import subprocess
+import urllib.parse
+import requests
 from datetime import datetime
 
 import feedparser
 import edge_tts
-from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip, vfx, TextClip
+from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip, vfx
 from PIL import Image, ImageDraw, ImageFont
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -92,7 +94,55 @@ def save_used_article(title):
     with open(USED_FILE, "a", encoding="utf-8") as f: f.write(title + "\n")
 
 # ----------------------------------------------------------------------
-# 2. TEXT-TO-SPEECH & AUDIO ENGINE
+# 2. AI IMAGE GENERATION (Pollinations.ai)
+# ----------------------------------------------------------------------
+def generate_ai_image(headline, output_path):
+    print(f"🖼️ Generating AI image for: {headline[:30]}...")
+    # Create a detailed prompt for the AI
+    prompt = f"{headline}, futuristic technology, artificial intelligence, digital art, cinematic lighting, 4k, no text"
+    encoded_prompt = urllib.parse.quote(prompt)
+    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+    
+    try:
+        response = requests.get(url, timeout=45)
+        if response.status_code == 200:
+            with open(output_path, "wb") as f:
+                f.write(response.content)
+            print("✅ AI Image generated.")
+            return True
+        else:
+            print(f"⚠️ Image generation failed (Status {response.status_code})")
+            return False
+    except Exception as e:
+        print(f"⚠️ Image generation failed: {e}")
+        return False
+
+def format_image_vertical(input_path, output_path):
+    """Crops and resizes the AI image to perfectly fit 1080x1920."""
+    try:
+        img = Image.open(input_path).convert("RGB")
+        width, height = img.size
+        target_ratio = 1080 / 1920
+        current_ratio = width / height
+
+        if current_ratio > target_ratio:
+            new_width = int(height * target_ratio)
+            left = (width - new_width) / 2
+            img = img.crop((left, 0, left + new_width, height))
+        else:
+            new_height = int(width / target_ratio)
+            top = (height - new_height) / 2
+            img = img.crop((0, top, width, top + new_height))
+
+        img = img.resize((1080, 1920))
+        img.save(output_path, "PNG")
+        return True
+    except Exception as e:
+        print(f"⚠️ Image formatting failed: {e}")
+        return False
+
+# ----------------------------------------------------------------------
+# 3. TEXT-TO-SPEECH & AUDIO ENGINE
 # ----------------------------------------------------------------------
 async def generate_story_audio(text, filename):
     print(f"🎙️ Generating voiceover for: {text[:40]}...")
@@ -121,7 +171,7 @@ def build_final_audio(num_stories):
     print("✅ Final voiceover with SFX created.")
 
 # ----------------------------------------------------------------------
-# 3. CREATE OVERLAY GRAPHICS, TICKER & THUMBNAIL
+# 4. CREATE OVERLAY GRAPHICS, TICKER & THUMBNAIL
 # ----------------------------------------------------------------------
 def wrap_text(text, font, max_width):
     lines = []
@@ -156,7 +206,7 @@ def create_overlay(headline, story_num, output_path="overlay.png"):
     draw.rectangle([(0, 0), (W, 110)], fill=(0, 0, 0, 220))
     draw.text((40, 35), f"🔴 LIVE  |  {CHANNEL_NAME}", fill=(255, 255, 255), font=font_channel)
 
-    banner_top = 1400  # Moved up slightly to make room for ticker
+    banner_top = 1400
     draw.rectangle([(0, banner_top), (W, 1820)], fill=(0, 0, 0, 200))
 
     draw.rectangle([(40, banner_top + 30), (380, banner_top + 90)], fill=(220, 0, 0))
@@ -171,34 +221,34 @@ def create_overlay(headline, story_num, output_path="overlay.png"):
     img.save(output_path)
 
 def create_ticker_image(headlines, output_path="ticker.png"):
-    """Creates a very wide image with all headlines that we will scroll."""
     print("🎟️ Creating scrolling ticker tape...")
     text_content = "   🔴 BREAKING AI NEWS   •   " + "   •   ".join(headlines) + "   •   SUBSCRIBE FOR MORE AI UPDATES DAILY   •   "
-    
     try:
         font = ImageFont.truetype(FONT_PATH, 40)
     except Exception:
         font = ImageFont.load_default()
         
-    # Estimate width
     bbox = font.getbbox(text_content)
     text_width = bbox[2] - bbox[0]
-    
     W = text_width + 200
     H = 100
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    
-    # Draw background bar
     draw.rectangle([(0, 0), (W, H)], fill=(220, 0, 0, 255))
     draw.text((50, 25), text_content, fill=(255, 255, 255), font=font)
     img.save(output_path)
 
-def create_thumbnail(stories, output_path="thumbnail.jpg"):
+def create_thumbnail(stories, bg_image_path, output_path="thumbnail.jpg"):
     print("🖼️ Creating custom YouTube thumbnail...")
     W, H = 1280, 720
-    img = Image.new("RGB", (W, H), (10, 10, 20)) 
-    draw = ImageDraw.Draw(img)
+    try:
+        img = Image.open(bg_image_path).resize((W, H))
+    except:
+        img = Image.new("RGB", (W, H), (10, 10, 20))
+    
+    draw = ImageDraw.Draw(img, "RGBA")
+    draw.rectangle([(0, 0), (W, H)], fill=(0, 0, 0, 120))
+
     try:
         font_huge = ImageFont.truetype(FONT_PATH, 70)
         font_med = ImageFont.truetype(FONT_PATH, 45)
@@ -223,46 +273,36 @@ def create_thumbnail(stories, output_path="thumbnail.jpg"):
     img.save(output_path, "JPEG", quality=90)
 
 # ----------------------------------------------------------------------
-# 4. BUILD FINAL VIDEO (FIXED BG LOADING + ANCHOR + TICKER)
+# 5. BUILD FINAL VIDEO (AI IMAGES + ANCHOR + TICKER)
 # ----------------------------------------------------------------------
 def build_video(stories, voiceover_path, output_path="final_video.mp4"):
     print("🎬 Building silent video with MoviePy...")
     
-    # 1. FIX: Load all background videos ONCE to prevent MoviePy memory crashes
-    bg_files = glob.glob("background*.mp4") + glob.glob("assets/background*.mp4")
-    loaded_bgs = []
-    for f in bg_files:
-        try:
-            clip = VideoFileClip(f).without_audio()
-            clip = clip.crop(x_center=clip.w / 2, width=1080, height=1920)
-            loaded_bgs.append(clip)
-            print(f"🎥 Loaded background: {f}")
-        except Exception as e:
-            print(f"⚠️ Failed to load {f}: {e}")
-            
-    if not loaded_bgs:
-        loaded_bgs.append(ColorClip(size=(1080, 1920), color=(15, 15, 25), duration=120))
-        
     segment_duration = 120 / len(stories)
     bg_clips = []
     overlay_clips = []
     
+    # Generate AI Images for all stories first
     for i, story in enumerate(stories):
-        # Pick a random loaded background and slice it
-        chosen_bg = random.choice(loaded_bgs)
-        if isinstance(chosen_bg, ColorClip):
-            bg_segment = chosen_bg.set_duration(segment_duration).set_start(i * segment_duration)
+        raw_img_path = f"raw_bg_{i}.png"
+        vert_img_path = f"bg_{i}.png"
+        
+        if generate_ai_image(story["title"], raw_img_path):
+            format_image_vertical(raw_img_path, vert_img_path)
+            if os.path.exists(raw_img_path): os.remove(raw_img_path)
         else:
-            if chosen_bg.duration < segment_duration + 1:
-                bg_segment = chosen_bg.loop(duration=segment_duration).subclip(0, segment_duration).set_start(i * segment_duration)
-            else:
-                # Pick a random start time to keep it fresh
-                max_start = max(0, chosen_bg.duration - segment_duration)
-                start_t = random.uniform(0, max_start)
-                bg_segment = chosen_bg.subclip(start_t, start_t + segment_duration).set_start(i * segment_duration)
+            vert_img_path = None # Fallback
+            
+        if vert_img_path:
+            bg_segment = ImageClip(vert_img_path).set_duration(segment_duration).set_start(i * segment_duration)
+            # Add subtle zoom effect
+            bg_segment = bg_segment.resize(lambda t: 1 + 0.02 * (t / segment_duration))
+        else:
+            print(f"⚠️ Using solid color fallback for News {i+1}")
+            bg_segment = ColorClip(size=(1080, 1920), color=(15, 15, 25), duration=segment_duration).set_start(i * segment_duration)
+            
         bg_clips.append(bg_segment)
         
-        # Create overlay with PPT crossfade
         overlay_path = f"overlay_{i}.png"
         create_overlay(story["title"], i+1, overlay_path)
         clip_duration = segment_duration + 1.0 if i < len(stories) - 1 else segment_duration
@@ -272,24 +312,21 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
 
     final_clips = bg_clips + overlay_clips
 
-    # 2. Add Scrolling Ticker Tape
+    # Add Scrolling Ticker Tape
     headlines = [s["title"] for s in stories]
     create_ticker_image(headlines, "ticker.png")
     ticker_img = ImageClip("ticker.png").set_duration(120)
-    # Scroll from right to left
-    # We need to calculate the scroll speed. Image width / 120 seconds.
     scroll_speed = ticker_img.w / 120.0 
     ticker_clip = ticker_img.set_position(lambda t: (1080 - (t * scroll_speed * 10) % (ticker_img.w + 1080), 1820)).set_duration(120)
     final_clips.append(ticker_clip)
 
-    # 3. Add Green Screen Anchor (if exists)
+    # Add Green Screen Anchor
     if os.path.exists(ANCHOR_VIDEO):
         print(f"👤 Loading green screen anchor: {ANCHOR_VIDEO}")
         try:
             anchor = VideoFileClip(ANCHOR_VIDEO).without_audio()
             anchor = anchor.loop(duration=120).set_duration(120)
             anchor = anchor.resize(width=400)
-            # More aggressive chroma key
             anchor_clip = anchor.fx(vfx.mask_color, color=[0, 255, 0], thr=150, s=5).set_position((640, 150)).set_duration(120)
             final_clips.append(anchor_clip)
         except Exception as e:
@@ -329,11 +366,12 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
         cmd_voice_only = [ffmpeg_exe, "-y", "-i", "silent_video.mp4", "-i", voiceover_path, "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-shortest", output_path]
         subprocess.run(cmd_voice_only)
 
-    for f in ["voice.mp3", "silent_video.mp4", "ticker.png"] + [f"overlay_{i}.png" for i in range(len(stories))]:
+    # Cleanup images
+    for f in ["voice.mp3", "silent_video.mp4", "ticker.png"] + [f"overlay_{i}.png" for i in range(len(stories))] + [f"bg_{i}.png" for i in range(len(stories))]:
         if os.path.exists(f): os.remove(f)
 
 # ----------------------------------------------------------------------
-# 5. UPLOAD TO YOUTUBE
+# 6. UPLOAD TO YOUTUBE
 # ----------------------------------------------------------------------
 def upload_to_youtube(video_path, thumb_path, title, description, tags):
     print("📤 Uploading to YouTube...")
@@ -382,8 +420,16 @@ if __name__ == "__main__":
         asyncio.run(generate_story_audio(script, f"voice_{i}.mp3"))
     build_final_audio(len(stories))
 
+    # Generate AI Image for Top Story to use as Thumbnail Background
+    thumb_bg_raw = "thumb_bg_raw.png"
+    thumb_bg_vert = "bg_0.png" # Reuse the first story's background for the thumbnail
+    if not os.path.exists(thumb_bg_vert):
+        if generate_ai_image(stories[0]["title"], thumb_bg_raw):
+            format_image_vertical(thumb_bg_raw, thumb_bg_vert)
+            if os.path.exists(thumb_bg_raw): os.remove(thumb_bg_raw)
+
     thumb_file = "thumbnail.jpg"
-    create_thumbnail(stories, thumb_file)
+    create_thumbnail(stories, thumb_bg_vert, thumb_file)
 
     video_file = "final_video.mp4"
     build_video(stories, "voice.mp3", video_file)
