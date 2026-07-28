@@ -8,7 +8,7 @@ from datetime import datetime
 
 import feedparser
 import edge_tts
-from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip
+from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip, vfx
 from PIL import Image, ImageDraw, ImageFont
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -30,6 +30,7 @@ NUM_STORIES = 5
 FONT_PATH = "Roboto-Bold.ttf"
 INTRO_MUSIC = "intro_music.mp3"
 SFX_TRANSITION = "sfx_whoosh.mp3"
+ANCHOR_VIDEO = "anchor.mp4"  # Green screen human presenter
 USED_FILE = "used_articles.txt"
 
 # ----------------------------------------------------------------------
@@ -40,19 +41,16 @@ def score_article(article):
     score = 10
     text = (article['title'] + " " + article['summary']).lower()
     
-    # High priority keywords
     high_priority = ["openai", "chatgpt", "anthropic", "gemini", "google", "apple", "microsoft", "meta", "nvidia", "breakthrough", "billion", "funding", "launches", "gpt-4", "agi"]
     for kw in high_priority:
         if kw in text:
             score += 5
             
-    # Medium priority keywords
     med_priority = ["ai", "machine learning", "robot", "model", "tech", "data", "automation", "cybersecurity"]
     for kw in med_priority:
         if kw in text:
             score += 2
             
-    # Penalize very short summaries (usually junk or paywalls)
     if len(article['summary']) < 100:
         score -= 3
         
@@ -64,7 +62,7 @@ def fetch_ai_news():
     for url in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
-            for article in feed.entries[:30]: # Fetch more to have a bigger pool to score
+            for article in feed.entries[:30]:
                 title = article.title.strip()
                 summary = ""
                 if 'summary' in article:
@@ -83,13 +81,11 @@ def fetch_ai_news():
     if not fresh:
         fresh = all_articles
 
-    # Score and sort the fresh articles
     for article in fresh:
         article['score'] = score_article(article)
         
-    fresh.sort(key=lambda x: x['score'], reverse=True) # Sort highest score first
+    fresh.sort(key=lambda x: x['score'], reverse=True)
 
-    # Pick the Top 5
     num_to_select = min(NUM_STORIES, len(fresh))
     chosen = fresh[:num_to_select]
     
@@ -198,7 +194,7 @@ def create_overlay(headline, story_num, output_path="overlay.png"):
 def create_thumbnail(stories, output_path="thumbnail.jpg"):
     print("🖼️ Creating custom YouTube thumbnail...")
     W, H = 1280, 720
-    img = Image.new("RGB", (W, H), (10, 10, 20)) # Dark background
+    img = Image.new("RGB", (W, H), (10, 10, 20)) 
     draw = ImageDraw.Draw(img)
 
     try:
@@ -210,21 +206,17 @@ def create_thumbnail(stories, output_path="thumbnail.jpg"):
         font_med = ImageFont.load_default()
         font_small = ImageFont.load_default()
 
-    # Top Red Banner
     draw.rectangle([(0, 0), (W, 90)], fill=(220, 0, 0))
     draw.text((40, 20), f"🔴 LIVE  |  {CHANNEL_NAME}", fill=(255, 255, 255), font=font_med)
 
-    # Top 3 Headlines
     y = 140
     for i in range(min(3, len(stories))):
-        # News Number Badge
         draw.rectangle([(40, y), (110, y+70)], fill=(220, 0, 0))
         draw.text((50, y+10), str(i+1), fill=(255, 255, 255), font=font_huge)
         
-        # Headline Text (Yellow for clickability)
         wrapped = wrap_text(stories[i]["title"], font_med, W - 180)
         text_y = y + 10
-        for line in wrapped[:2]: # Max 2 lines per headline
+        for line in wrapped[:2]:
             draw.text((130, text_y), line, fill=(255, 255, 0), font=font_med)
             text_y += 50
         y += 180
@@ -233,29 +225,44 @@ def create_thumbnail(stories, output_path="thumbnail.jpg"):
     print("✅ Thumbnail saved.")
 
 # ----------------------------------------------------------------------
-# 4. BUILD FINAL VIDEO (WITH DYNAMIC BACKGROUNDS & PPT CROSSFADE)
+# 4. BUILD FINAL VIDEO (ANCHOR + DYNAMIC BG + PPT CROSSFADE)
 # ----------------------------------------------------------------------
 def build_video(stories, voiceover_path, output_path="final_video.mp4"):
     print("🎬 Building silent video with MoviePy...")
     
-    bg_files = glob.glob("*.mp4") + glob.glob("assets/*.mp4")
+    bg_files = glob.glob("background*.mp4") + glob.glob("assets/background*.mp4")
     if not bg_files:
-        raise Exception("No .mp4 files found anywhere in the repo!")
+        raise Exception("No background .mp4 files found!")
     
     segment_duration = 120 / len(stories)
     
     bg_clips = []
     overlay_clips = []
+    final_clips = []
     
+    # 1. Prepare the Green Screen Anchor (if exists)
+    anchor_clip = None
+    if os.path.exists(ANCHOR_VIDEO):
+        print(f"👤 Loading green screen anchor: {ANCHOR_VIDEO}")
+        try:
+            anchor = VideoFileClip(ANCHOR_VIDEO).without_audio()
+            # Loop to match total duration (120s)
+            anchor = anchor.loop(duration=120).set_duration(120)
+            # Resize to fit in the top right corner (e.g., width 400px)
+            anchor = anchor.resize(width=400)
+            # Apply Chroma Key (remove green)
+            anchor_clip = anchor.fx(vfx.mask_color, color=[0, 255, 0], thr=100, s=5).set_position((640, 150)).set_duration(120)
+        except Exception as e:
+            print(f"⚠️ Anchor video failed to load: {e}")
+
     for i, story in enumerate(stories):
-        # 1. Pick a random background for THIS story
+        # 2. Pick a random background for THIS story
         bg_path = random.choice(bg_files)
         print(f"🎥 News {i+1} using background: {bg_path}")
         
         try:
             bg_segment = VideoFileClip(bg_path).without_audio()
             bg_segment = bg_segment.crop(x_center=bg_segment.w / 2, width=1080, height=1920)
-            # Loop if too short, cut if too long
             if bg_segment.duration < segment_duration:
                 bg_segment = bg_segment.loop(duration=segment_duration)
             bg_segment = bg_segment.subclip(0, segment_duration).set_start(i * segment_duration)
@@ -265,7 +272,7 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
             
         bg_clips.append(bg_segment)
         
-        # 2. Create overlay with PPT crossfade
+        # 3. Create overlay with PPT crossfade
         overlay_path = f"overlay_{i}.png"
         create_overlay(story["title"], i+1, overlay_path)
         
@@ -277,7 +284,12 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
             
         overlay_clips.append(clip)
 
-    final = CompositeVideoClip(bg_clips + overlay_clips, size=(1080, 1920)).set_duration(120)
+    # Combine Backgrounds + Overlays + Anchor
+    final_clips = bg_clips + overlay_clips
+    if anchor_clip:
+        final_clips.append(anchor_clip)
+
+    final = CompositeVideoClip(final_clips, size=(1080, 1920)).set_duration(120)
 
     final.write_videofile(
         "silent_video.mp4",
