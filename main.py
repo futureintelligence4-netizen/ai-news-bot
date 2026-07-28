@@ -24,12 +24,11 @@ RSS_FEEDS = [
     "https://techcrunch.com/category/artificial-intelligence/feed/",
 ]
 
-VOICE = "en-US-GuyNeural" # Ultra-realistic Microsoft Edge voice
+VOICE = "en-US-GuyNeural"
 CHANNEL_NAME = "AI News Daily"
-NUM_STORIES = 5           # Number of news stories per video
-BACKGROUND_DIR = "."
-FONT_PATH = "assets/Roboto-Bold.ttf"
-INTRO_MUSIC = "assets/intro_music.mp3"
+NUM_STORIES = 5
+FONT_PATH = "Roboto-Bold.ttf"
+INTRO_MUSIC = "intro_music.mp3"
 USED_FILE = "used_articles.txt"
 
 # ----------------------------------------------------------------------
@@ -60,7 +59,6 @@ def fetch_ai_news():
     if not fresh:
         fresh = all_articles
 
-    # Pick 5 unique stories
     num_to_select = min(NUM_STORIES, len(fresh))
     chosen = random.sample(fresh, num_to_select)
     
@@ -83,7 +81,7 @@ def save_used_article(title):
         f.write(title + "\n")
 
 # ----------------------------------------------------------------------
-# 2. TEXT-TO-SPEECH (Edge-TTS Natural Voice)
+# 2. TEXT-TO-SPEECH
 # ----------------------------------------------------------------------
 async def generate_voiceover(text, filename):
     print("🎙️ Generating natural voiceover with edge-tts...")
@@ -133,7 +131,6 @@ def create_overlay(headline, story_num, output_path="overlay.png"):
     banner_top = 1480
     draw.rectangle([(0, banner_top), (W, H)], fill=(0, 0, 0, 200))
 
-    # Red label changes for each story
     draw.rectangle([(40, banner_top + 30), (400, banner_top + 90)], fill=(220, 0, 0))
     draw.text((55, banner_top + 35), f"STORY {story_num}", fill=(255, 255, 255), font=font_label)
 
@@ -146,25 +143,23 @@ def create_overlay(headline, story_num, output_path="overlay.png"):
     img.save(output_path)
 
 # ----------------------------------------------------------------------
-# 4. BUILD FINAL VIDEO (Multi-Story, Silent Video + Raw FFmpeg)
+# 4. BUILD FINAL VIDEO
 # ----------------------------------------------------------------------
 def build_video(stories, voiceover_path, output_path="final_video.mp4"):
     print("🎬 Building silent video with MoviePy...")
-
-    bg_files = glob.glob("*.mp4") + glob.glob("assets/*.mp4")
-if not bg_files:
-    raise Exception("No .mp4 files found anywhere in the repo!")
     
+    # Foolproof search for any mp4 file in the repo
+    bg_files = glob.glob("*.mp4") + glob.glob("assets/*.mp4")
+    if not bg_files:
+        raise Exception("No .mp4 files found anywhere in the repo!")
     bg_path = random.choice(bg_files)
+    print(f"🎥 Using background video: {bg_path}")
 
-    # Create an overlay image for each story
     overlay_clips = []
     for i, story in enumerate(stories):
         overlay_path = f"overlay_{i}.png"
         create_overlay(story["title"], i+1, overlay_path)
         
-        # Each story gets an equal slice of time on screen (e.g., 120s / 5 = 24s each)
-        # We use a large number (120s) because -shortest will cut it to the audio length later
         segment_duration = 120 / len(stories) 
         clip = ImageClip(overlay_path).set_duration(segment_duration).set_start(i * segment_duration)
         overlay_clips.append(clip)
@@ -175,7 +170,6 @@ if not bg_files:
 
     final = CompositeVideoClip([bg] + overlay_clips, size=(1080, 1920)).set_duration(120)
 
-    # Write SILENT video
     final.write_videofile(
         "silent_video.mp4",
         fps=24,
@@ -216,7 +210,6 @@ if not bg_files:
 
     subprocess.run(cmd)
 
-    # Cleanup
     for f in ["voice.mp3", "silent_video.mp4"] + [f"overlay_{i}.png" for i in range(len(stories))]:
         if os.path.exists(f):
             os.remove(f)
@@ -272,10 +265,8 @@ def upload_to_youtube(video_path, title, description, tags):
 # MAIN
 # ----------------------------------------------------------------------
 if __name__ == "__main__":
-    # 1. Fetch 5 Stories
     stories = fetch_ai_news()
     
-    # 2. Build Voiceover Script
     script = f"Here are the top {len(stories)} AI news stories today. "
     for i, story in enumerate(stories):
         script += f"Story number {i+1}. {story['title']}. {story['summary']} "
@@ -284,11 +275,9 @@ if __name__ == "__main__":
     voiceover_file = "voice.mp3"
     asyncio.run(generate_voiceover(script, voiceover_file))
 
-    # 3. Build Video
     video_file = "final_video.mp4"
     build_video(stories, voiceover_file, video_file)
 
-    # 4. Upload
     date_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     title = f"Top {len(stories)} AI News Stories - {date_str}"
     description = "In today's AI news:\n\n"
