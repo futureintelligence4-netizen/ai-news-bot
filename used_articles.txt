@@ -19,3 +19,8 @@ Anthropic releases Opus 5 with ‘close’ to Fable 5’s capabilities
 Microsoft launches its first cybersecurity model, plus a new agentic cybersecurity system
 Machine Learning Boost System for Biomedical Imaging, Autonomous Vehicle Sensors - Technology Networks
 You can’t ignore Google Zero anymore
+Moonshot AI releases weights for Kimi-K3, firing a shot across the bow of OpenAI and Anthropic — open-weight model performs almost as well as frontier models while being 2-3x easier to run - Tom's Hardware
+Nvidia bets $5bn on Ilya Sutskever’s AI breakthrough - Financial Times
+Anthropic’s Dario Amodei responds: doesn’t oppose open-weight models, but fears Chinese AI
+Google’s AI search is rapidly becoming the default, new data shows
+Cornerstone Launches President's AI Advisory Board to Lead the Future of Christian Higher Education - Cornerstone University
