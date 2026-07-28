@@ -191,8 +191,11 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
     except ImportError:
         ffmpeg_exe = "ffmpeg"
 
+    merge_success = False
+    
+    # Try to merge with music
     if os.path.exists(INTRO_MUSIC) and os.path.getsize(INTRO_MUSIC) > 0:
-        cmd = [
+        cmd_with_music = [
             ffmpeg_exe, "-y",
             "-i", "silent_video.mp4",
             "-i", voiceover_path,
@@ -202,8 +205,17 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
             "-c:v", "copy", "-c:a", "aac",
             "-shortest", output_path
         ]
-    else:
-        cmd = [
+        subprocess.run(cmd_with_music)
+        
+        # Verify it actually created the file
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            merge_success = True
+        else:
+            print("⚠️ Music file is corrupted! Falling back to voice only...")
+
+    # Fallback: Merge without music
+    if not merge_success:
+        cmd_voice_only = [
             ffmpeg_exe, "-y",
             "-i", "silent_video.mp4",
             "-i", voiceover_path,
@@ -211,8 +223,7 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
             "-c:v", "copy", "-c:a", "aac",
             "-shortest", output_path
         ]
-
-    subprocess.run(cmd)
+        subprocess.run(cmd_voice_only)
 
     for f in ["voice.mp3", "silent_video.mp4"] + [f"overlay_{i}.png" for i in range(len(stories))]:
         if os.path.exists(f):
