@@ -27,7 +27,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-         pip install feedparser edge-tts moviepy==1.0.3 Pillow google-api-python-client google-auth-oauthlib imageio-ffmpeg
+          pip install feedparser edge-tts moviepy==1.0.3 Pillow google-api-python-client google-auth-oauthlib imageio-ffmpeg
       - name: Run AI News Bot
         env:
           YOUTUBE_TOKEN: ${{ secrets.YOUTUBE_TOKEN }}
