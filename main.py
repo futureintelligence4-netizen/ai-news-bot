@@ -143,31 +143,25 @@ def create_overlay(headline, story_num, output_path="overlay.png"):
     img.save(output_path)
 
 # ----------------------------------------------------------------------
-# 4. BUILD FINAL VIDEO (Bulletproof Background Logic)
+# 4. BUILD FINAL VIDEO
 # ----------------------------------------------------------------------
 def build_video(stories, voiceover_path, output_path="final_video.mp4"):
     print("🎬 Building silent video with MoviePy...")
     
     bg_files = glob.glob("*.mp4") + glob.glob("assets/*.mp4")
     
-    # Try to load a real background video, but if it's corrupted/missing, use a solid dark color
     try:
         if bg_files:
             bg_path = random.choice(bg_files)
             print(f"🎥 Using background video: {bg_path}")
             bg = VideoFileClip(bg_path).without_audio()
             bg = bg.crop(x_center=bg.w / 2, width=1080, height=1920)
+            bg = bg.loop(duration=120).set_duration(120)
         else:
             raise Exception("No video file found")
     except Exception as e:
-        
-             print(f"⚠️ Background video missing or corrupted. Using solid color background. Error: {e}")
-     # FIX: ColorClip needs duration set directly, it cannot be 'looped'
-     bg = ColorClip(size=(1080, 1920), color=(15, 15, 25), duration=120)
-
- # Only loop the background if it's a real video file
- if not isinstance(bg, ColorClip):
-     bg = bg.loop(duration=120).set_duration(120)
+        print(f"⚠️ Background video missing or corrupted. Using solid color background. Error: {e}")
+        bg = ColorClip(size=(1080, 1920), color=(15, 15, 25), duration=120)
 
     overlay_clips = []
     for i, story in enumerate(stories):
