@@ -29,6 +29,7 @@ CHANNEL_NAME = "AI News Daily"
 NUM_STORIES = 5
 FONT_PATH = "Roboto-Bold.ttf"
 INTRO_MUSIC = "intro_music.mp3"
+SFX_TRANSITION = "sfx_whoosh.mp3"  # New Sound Effect
 USED_FILE = "used_articles.txt"
 
 # ----------------------------------------------------------------------
@@ -81,13 +82,39 @@ def save_used_article(title):
         f.write(title + "\n")
 
 # ----------------------------------------------------------------------
-# 2. TEXT-TO-SPEECH
+# 2. TEXT-TO-SPEECH & AUDIO ENGINE
 # ----------------------------------------------------------------------
-async def generate_voiceover(text, filename):
-    print("🎙️ Generating natural voiceover with edge-tts...")
+async def generate_story_audio(text, filename):
+    print(f"🎙️ Generating voiceover for: {text[:40]}...")
     communicate = edge_tts.Communicate(text, voice=VOICE)
     await communicate.save(filename)
-    print("✅ Voiceover saved.")
+
+def build_final_audio(num_stories):
+    """Stitches voice_1.mp3 + sfx_whoosh.mp3 + voice_2.mp3 ... into voice.mp3"""
+    print("🎵 Stitching audio and sound effects together...")
+    try:
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    except ImportError:
+        ffmpeg_exe = "ffmpeg"
+
+    # Create a text file that tells FFmpeg the order of audio files
+    with open("audio_list.txt", "w") as f:
+        for i in range(num_stories):
+            f.write(f"file 'voice_{i}.mp3'\n")
+            if i < num_stories - 1:  # Don't add whoosh after the last story
+                if os.path.exists(SFX_TRANSITION):
+                    f.write(f"file '{SFX_TRANSITION}'\n")
+    
+    # Run FFmpeg to concatenate them
+    cmd = [ffmpeg_exe, "-y", "-f", "concat", "-safe", "0", "-i", "audio_list.txt", "-c:a", "libmp3lame", "-b:a", "48k", "voice.mp3"]
+    subprocess.run(cmd)
+    
+    # Cleanup individual files
+    if os.path.exists("audio_list.txt"): os.remove("audio_list.txt")
+    for i in range(num_stories):
+        if os.path.exists(f"voice_{i}.mp3"): os.remove(f"voice_{i}.mp3")
+    print("✅ Final voiceover with SFX created.")
 
 # ----------------------------------------------------------------------
 # 3. CREATE OVERLAY GRAPHICS
@@ -184,7 +211,7 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
         ffmpeg_params=["-pix_fmt", "yuv420p"]
     )
 
-    print("🎵 Merging audio and video using raw FFmpeg...")
+    print("🎵 Merging final audio and video using raw FFmpeg...")
     try:
         import imageio_ffmpeg
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
@@ -193,7 +220,6 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
 
     merge_success = False
     
-    # Try to merge with music
     if os.path.exists(INTRO_MUSIC) and os.path.getsize(INTRO_MUSIC) > 0:
         cmd_with_music = [
             ffmpeg_exe, "-y",
@@ -207,13 +233,11 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
         ]
         subprocess.run(cmd_with_music)
         
-        # Verify it actually created the file
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             merge_success = True
         else:
             print("⚠️ Music file is corrupted! Falling back to voice only...")
 
-    # Fallback: Merge without music
     if not merge_success:
         cmd_voice_only = [
             ffmpeg_exe, "-y",
@@ -282,17 +306,19 @@ def upload_to_youtube(video_path, title, description, tags):
 if __name__ == "__main__":
     stories = fetch_ai_news()
     
-    script = f"Here are the top {len(stories)} AI news stories today. "
+    # 1. Generate individual voiceovers for each story
     for i, story in enumerate(stories):
-        script += f"Story number {i+1}. {story['title']}. {story['summary']} "
-    script += f"That's all for today. Stay tuned to {CHANNEL_NAME} for more updates."
+        script = f"Story number {i+1}. {story['title']}. {story['summary']} "
+        asyncio.run(generate_story_audio(script, f"voice_{i}.mp3"))
     
-    voiceover_file = "voice.mp3"
-    asyncio.run(generate_voiceover(script, voiceover_file))
+    # 2. Stitch them together with the Whoosh sound effect
+    build_final_audio(len(stories))
 
+    # 3. Build Video
     video_file = "final_video.mp4"
-    build_video(stories, voiceover_file, video_file)
+    build_video(stories, "voice.mp3", video_file)
 
+    # 4. Upload
     date_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     title = f"Top {len(stories)} AI News Stories - {date_str}"
     description = "In today's AI news:\n\n"
