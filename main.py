@@ -8,7 +8,7 @@ from datetime import datetime
 
 import feedparser
 import edge_tts
-from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
+from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip
 from PIL import Image, ImageDraw, ImageFont
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -143,17 +143,27 @@ def create_overlay(headline, story_num, output_path="overlay.png"):
     img.save(output_path)
 
 # ----------------------------------------------------------------------
-# 4. BUILD FINAL VIDEO
+# 4. BUILD FINAL VIDEO (Bulletproof Background Logic)
 # ----------------------------------------------------------------------
 def build_video(stories, voiceover_path, output_path="final_video.mp4"):
     print("🎬 Building silent video with MoviePy...")
     
-    # Foolproof search for any mp4 file in the repo
     bg_files = glob.glob("*.mp4") + glob.glob("assets/*.mp4")
-    if not bg_files:
-        raise Exception("No .mp4 files found anywhere in the repo!")
-    bg_path = random.choice(bg_files)
-    print(f"🎥 Using background video: {bg_path}")
+    
+    # Try to load a real background video, but if it's corrupted/missing, use a solid dark color
+    try:
+        if bg_files:
+            bg_path = random.choice(bg_files)
+            print(f"🎥 Using background video: {bg_path}")
+            bg = VideoFileClip(bg_path).without_audio()
+            bg = bg.crop(x_center=bg.w / 2, width=1080, height=1920)
+        else:
+            raise Exception("No video file found")
+    except Exception as e:
+        print(f"⚠️ Background video missing or corrupted. Using solid color background. Error: {e}")
+        bg = ColorClip(size=(1080, 1920), color=(15, 15, 25)) # Dark blue/black studio color
+
+    bg = bg.loop(duration=120).set_duration(120)
 
     overlay_clips = []
     for i, story in enumerate(stories):
@@ -163,10 +173,6 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
         segment_duration = 120 / len(stories) 
         clip = ImageClip(overlay_path).set_duration(segment_duration).set_start(i * segment_duration)
         overlay_clips.append(clip)
-
-    bg = VideoFileClip(bg_path).without_audio()
-    bg = bg.crop(x_center=bg.w / 2, width=1080, height=1920)
-    bg = bg.loop(duration=120).set_duration(120)
 
     final = CompositeVideoClip([bg] + overlay_clips, size=(1080, 1920)).set_duration(120)
 
