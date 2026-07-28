@@ -8,7 +8,7 @@ from datetime import datetime
 
 import feedparser
 import edge_tts
-from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip
+from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip, vfx
 from PIL import Image, ImageDraw, ImageFont
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -154,7 +154,6 @@ def create_overlay(headline, story_num, output_path="overlay.png"):
     banner_top = 1480
     draw.rectangle([(0, banner_top), (W, H)], fill=(0, 0, 0, 200))
 
-    # Changed "STORY" to "NEWS"
     draw.rectangle([(40, banner_top + 30), (380, banner_top + 90)], fill=(220, 0, 0))
     draw.text((55, banner_top + 35), f"NEWS {story_num}", fill=(255, 255, 255), font=font_label)
 
@@ -204,7 +203,7 @@ def create_thumbnail(stories, output_path="thumbnail.jpg"):
     print("✅ Thumbnail saved.")
 
 # ----------------------------------------------------------------------
-# 4. BUILD FINAL VIDEO
+# 4. BUILD FINAL VIDEO (WITH PPT CROSSFADE EFFECT)
 # ----------------------------------------------------------------------
 def build_video(stories, voiceover_path, output_path="final_video.mp4"):
     print("🎬 Building silent video with MoviePy...")
@@ -225,12 +224,20 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
         bg = ColorClip(size=(1080, 1920), color=(15, 15, 25), duration=120)
 
     overlay_clips = []
+    segment_duration = 120 / len(stories)
+    
     for i, story in enumerate(stories):
         overlay_path = f"overlay_{i}.png"
         create_overlay(story["title"], i+1, overlay_path)
         
-        segment_duration = 120 / len(stories) 
-        clip = ImageClip(overlay_path).set_duration(segment_duration).set_start(i * segment_duration)
+        # To crossfade, the clip needs to overlap the previous one by 1 second
+        clip_duration = segment_duration + 1.0 if i < len(stories) - 1 else segment_duration
+        clip = ImageClip(overlay_path).set_duration(clip_duration).set_start(i * segment_duration)
+        
+        # Add the PPT Crossfade effect (1 second smooth dissolve) for all stories after the first one
+        if i > 0:
+            clip = clip.crossfadein(1.0)
+            
         overlay_clips.append(clip)
 
     final = CompositeVideoClip([bg] + overlay_clips, size=(1080, 1920)).set_duration(120)
@@ -334,7 +341,6 @@ def upload_to_youtube(video_path, thumb_path, title, description, tags):
     print(f"✅ Uploaded! Video ID: {video_id}")
     print(f"🔗 https://youtube.com/watch?v={video_id}")
 
-    # Upload Custom Thumbnail
     if os.path.exists(thumb_path):
         print("🖼️ Uploading custom thumbnail...")
         try:
@@ -344,7 +350,7 @@ def upload_to_youtube(video_path, thumb_path, title, description, tags):
             ).execute()
             print("✅ Thumbnail uploaded successfully!")
         except Exception as e:
-            print(f"⚠️ Thumbnail upload failed (Channel may require verification): {e}")
+            print(f"⚠️ Thumbnail upload failed: {e}")
             
     return video_id
 
@@ -354,21 +360,17 @@ def upload_to_youtube(video_path, thumb_path, title, description, tags):
 if __name__ == "__main__":
     stories = fetch_ai_news()
     
-    # 1. Generate audio
     for i, story in enumerate(stories):
         script = f"News number {i+1}. {story['title']}. {story['summary']} "
         asyncio.run(generate_story_audio(script, f"voice_{i}.mp3"))
     build_final_audio(len(stories))
 
-    # 2. Generate Thumbnail
     thumb_file = "thumbnail.jpg"
     create_thumbnail(stories, thumb_file)
 
-    # 3. Build Video
     video_file = "final_video.mp4"
     build_video(stories, "voice.mp3", video_file)
 
-    # 4. Upload
     date_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     title = f"Top {len(stories)} AI News Stories - {date_str}"
     description = "In today's AI news:\n\n"
@@ -380,7 +382,6 @@ if __name__ == "__main__":
 
     upload_to_youtube(video_file, thumb_file, title, description, tags)
 
-    # Cleanup
     for f in [video_file, thumb_file]:
         if os.path.exists(f):
             os.remove(f)
