@@ -160,10 +160,14 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
         else:
             raise Exception("No video file found")
     except Exception as e:
-        print(f"⚠️ Background video missing or corrupted. Using solid color background. Error: {e}")
-        bg = ColorClip(size=(1080, 1920), color=(15, 15, 25)) # Dark blue/black studio color
+        
+             print(f"⚠️ Background video missing or corrupted. Using solid color background. Error: {e}")
+     # FIX: ColorClip needs duration set directly, it cannot be 'looped'
+     bg = ColorClip(size=(1080, 1920), color=(15, 15, 25), duration=120)
 
-    bg = bg.loop(duration=120).set_duration(120)
+ # Only loop the background if it's a real video file
+ if not isinstance(bg, ColorClip):
+     bg = bg.loop(duration=120).set_duration(120)
 
     overlay_clips = []
     for i, story in enumerate(stories):
