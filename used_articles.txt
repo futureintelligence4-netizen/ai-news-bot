@@ -14,3 +14,8 @@ Are brain waves the next unlock for physical AI?
 Adoption of artificial intelligence outpaces training in field epidemiology programs, new survey finds - CIDRAP
 Improving AI models’ ability to explain their predictions - MIT News
 Deep-learning model predicts how fruit flies form, cell by cell - MIT News
+Nvidia, Microsoft launch open AI security alliance — without OpenAI, Google, or Anthropic
+Anthropic releases Opus 5 with ‘close’ to Fable 5’s capabilities
+Microsoft launches its first cybersecurity model, plus a new agentic cybersecurity system
+Machine Learning Boost System for Biomedical Imaging, Autonomous Vehicle Sensors - Technology Networks
+You can’t ignore Google Zero anymore
