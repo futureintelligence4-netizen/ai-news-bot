@@ -8,7 +8,7 @@ from datetime import datetime
 
 import feedparser
 import edge_tts
-from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip, vfx
+from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip, vfx, TextClip
 from PIL import Image, ImageDraw, ImageFont
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -30,30 +30,22 @@ NUM_STORIES = 5
 FONT_PATH = "Roboto-Bold.ttf"
 INTRO_MUSIC = "intro_music.mp3"
 SFX_TRANSITION = "sfx_whoosh.mp3"
-ANCHOR_VIDEO = "anchor.mp4"  # Green screen human presenter
+ANCHOR_VIDEO = "anchor.mp4" 
 USED_FILE = "used_articles.txt"
 
 # ----------------------------------------------------------------------
 # 1. FETCH AI NEWS & SCORE BY PRIORITY
 # ----------------------------------------------------------------------
 def score_article(article):
-    """Scores articles based on high-priority AI keywords."""
     score = 10
     text = (article['title'] + " " + article['summary']).lower()
-    
     high_priority = ["openai", "chatgpt", "anthropic", "gemini", "google", "apple", "microsoft", "meta", "nvidia", "breakthrough", "billion", "funding", "launches", "gpt-4", "agi"]
     for kw in high_priority:
-        if kw in text:
-            score += 5
-            
+        if kw in text: score += 5
     med_priority = ["ai", "machine learning", "robot", "model", "tech", "data", "automation", "cybersecurity"]
     for kw in med_priority:
-        if kw in text:
-            score += 2
-            
-    if len(article['summary']) < 100:
-        score -= 3
-        
+        if kw in text: score += 2
+    if len(article['summary']) < 100: score -= 3
     return score
 
 def fetch_ai_news():
@@ -65,10 +57,8 @@ def fetch_ai_news():
             for article in feed.entries[:30]:
                 title = article.title.strip()
                 summary = ""
-                if 'summary' in article:
-                    summary = article.summary.strip()
-                elif 'description' in article:
-                    summary = article.description.strip()
+                if 'summary' in article: summary = article.summary.strip()
+                elif 'description' in article: summary = article.description.strip()
                 import re
                 summary = re.sub(r'<[^>]+>', '', summary)
                 if title and len(title) > 15:
@@ -78,19 +68,15 @@ def fetch_ai_news():
 
     used = load_used_articles()
     fresh = [a for a in all_articles if a["title"] not in used]
-    if not fresh:
-        fresh = all_articles
+    if not fresh: fresh = all_articles
 
-    for article in fresh:
-        article['score'] = score_article(article)
-        
+    for article in fresh: article['score'] = score_article(article)
     fresh.sort(key=lambda x: x['score'], reverse=True)
 
     num_to_select = min(NUM_STORIES, len(fresh))
     chosen = fresh[:num_to_select]
     
-    for story in chosen:
-        save_used_article(story["title"])
+    for story in chosen: save_used_article(story["title"])
         
     print(f"✅ Selected Top {len(chosen)} Priority Stories!")
     for i, story in enumerate(chosen):
@@ -98,14 +84,12 @@ def fetch_ai_news():
     return chosen
 
 def load_used_articles():
-    if not os.path.exists(USED_FILE):
-        return set()
+    if not os.path.exists(USED_FILE): return set()
     with open(USED_FILE, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f.readlines()[-200:])
 
 def save_used_article(title):
-    with open(USED_FILE, "a", encoding="utf-8") as f:
-        f.write(title + "\n")
+    with open(USED_FILE, "a", encoding="utf-8") as f: f.write(title + "\n")
 
 # ----------------------------------------------------------------------
 # 2. TEXT-TO-SPEECH & AUDIO ENGINE
@@ -127,19 +111,17 @@ def build_final_audio(num_stories):
         for i in range(num_stories):
             f.write(f"file 'voice_{i}.mp3'\n")
             if i < num_stories - 1:
-                if os.path.exists(SFX_TRANSITION):
-                    f.write(f"file '{SFX_TRANSITION}'\n")
+                if os.path.exists(SFX_TRANSITION): f.write(f"file '{SFX_TRANSITION}'\n")
     
     cmd = [ffmpeg_exe, "-y", "-f", "concat", "-safe", "0", "-i", "audio_list.txt", "-c:a", "libmp3lame", "-b:a", "48k", "voice.mp3"]
     subprocess.run(cmd)
-    
     if os.path.exists("audio_list.txt"): os.remove("audio_list.txt")
     for i in range(num_stories):
         if os.path.exists(f"voice_{i}.mp3"): os.remove(f"voice_{i}.mp3")
     print("✅ Final voiceover with SFX created.")
 
 # ----------------------------------------------------------------------
-# 3. CREATE OVERLAY GRAPHICS & THUMBNAIL
+# 3. CREATE OVERLAY GRAPHICS, TICKER & THUMBNAIL
 # ----------------------------------------------------------------------
 def wrap_text(text, font, max_width):
     lines = []
@@ -149,14 +131,11 @@ def wrap_text(text, font, max_width):
         test_line = (current_line + " " + word).strip()
         bbox = font.getbbox(test_line)
         width = bbox[2] - bbox[0]
-        if width <= max_width:
-            current_line = test_line
+        if width <= max_width: current_line = test_line
         else:
-            if current_line:
-                lines.append(current_line)
+            if current_line: lines.append(current_line)
             current_line = word
-    if current_line:
-        lines.append(current_line)
+    if current_line: lines.append(current_line)
     return lines
 
 def create_overlay(headline, story_num, output_path="overlay.png"):
@@ -177,8 +156,8 @@ def create_overlay(headline, story_num, output_path="overlay.png"):
     draw.rectangle([(0, 0), (W, 110)], fill=(0, 0, 0, 220))
     draw.text((40, 35), f"🔴 LIVE  |  {CHANNEL_NAME}", fill=(255, 255, 255), font=font_channel)
 
-    banner_top = 1480
-    draw.rectangle([(0, banner_top), (W, H)], fill=(0, 0, 0, 200))
+    banner_top = 1400  # Moved up slightly to make room for ticker
+    draw.rectangle([(0, banner_top), (W, 1820)], fill=(0, 0, 0, 200))
 
     draw.rectangle([(40, banner_top + 30), (380, banner_top + 90)], fill=(220, 0, 0))
     draw.text((55, banner_top + 35), f"NEWS {story_num}", fill=(255, 255, 255), font=font_label)
@@ -191,20 +170,41 @@ def create_overlay(headline, story_num, output_path="overlay.png"):
 
     img.save(output_path)
 
+def create_ticker_image(headlines, output_path="ticker.png"):
+    """Creates a very wide image with all headlines that we will scroll."""
+    print("🎟️ Creating scrolling ticker tape...")
+    text_content = "   🔴 BREAKING AI NEWS   •   " + "   •   ".join(headlines) + "   •   SUBSCRIBE FOR MORE AI UPDATES DAILY   •   "
+    
+    try:
+        font = ImageFont.truetype(FONT_PATH, 40)
+    except Exception:
+        font = ImageFont.load_default()
+        
+    # Estimate width
+    bbox = font.getbbox(text_content)
+    text_width = bbox[2] - bbox[0]
+    
+    W = text_width + 200
+    H = 100
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    
+    # Draw background bar
+    draw.rectangle([(0, 0), (W, H)], fill=(220, 0, 0, 255))
+    draw.text((50, 25), text_content, fill=(255, 255, 255), font=font)
+    img.save(output_path)
+
 def create_thumbnail(stories, output_path="thumbnail.jpg"):
     print("🖼️ Creating custom YouTube thumbnail...")
     W, H = 1280, 720
     img = Image.new("RGB", (W, H), (10, 10, 20)) 
     draw = ImageDraw.Draw(img)
-
     try:
         font_huge = ImageFont.truetype(FONT_PATH, 70)
         font_med = ImageFont.truetype(FONT_PATH, 45)
-        font_small = ImageFont.truetype(FONT_PATH, 35)
     except Exception:
         font_huge = ImageFont.load_default()
         font_med = ImageFont.load_default()
-        font_small = ImageFont.load_default()
 
     draw.rectangle([(0, 0), (W, 90)], fill=(220, 0, 0))
     draw.text((40, 20), f"🔴 LIVE  |  {CHANNEL_NAME}", fill=(255, 255, 255), font=font_med)
@@ -213,7 +213,6 @@ def create_thumbnail(stories, output_path="thumbnail.jpg"):
     for i in range(min(3, len(stories))):
         draw.rectangle([(40, y), (110, y+70)], fill=(220, 0, 0))
         draw.text((50, y+10), str(i+1), fill=(255, 255, 255), font=font_huge)
-        
         wrapped = wrap_text(stories[i]["title"], font_med, W - 180)
         text_y = y + 10
         for line in wrapped[:2]:
@@ -222,72 +221,79 @@ def create_thumbnail(stories, output_path="thumbnail.jpg"):
         y += 180
 
     img.save(output_path, "JPEG", quality=90)
-    print("✅ Thumbnail saved.")
 
 # ----------------------------------------------------------------------
-# 4. BUILD FINAL VIDEO (ANCHOR + DYNAMIC BG + PPT CROSSFADE)
+# 4. BUILD FINAL VIDEO (FIXED BG LOADING + ANCHOR + TICKER)
 # ----------------------------------------------------------------------
 def build_video(stories, voiceover_path, output_path="final_video.mp4"):
     print("🎬 Building silent video with MoviePy...")
     
+    # 1. FIX: Load all background videos ONCE to prevent MoviePy memory crashes
     bg_files = glob.glob("background*.mp4") + glob.glob("assets/background*.mp4")
-    if not bg_files:
-        raise Exception("No background .mp4 files found!")
-    
+    loaded_bgs = []
+    for f in bg_files:
+        try:
+            clip = VideoFileClip(f).without_audio()
+            clip = clip.crop(x_center=clip.w / 2, width=1080, height=1920)
+            loaded_bgs.append(clip)
+            print(f"🎥 Loaded background: {f}")
+        except Exception as e:
+            print(f"⚠️ Failed to load {f}: {e}")
+            
+    if not loaded_bgs:
+        loaded_bgs.append(ColorClip(size=(1080, 1920), color=(15, 15, 25), duration=120))
+        
     segment_duration = 120 / len(stories)
-    
     bg_clips = []
     overlay_clips = []
-    final_clips = []
     
-    # 1. Prepare the Green Screen Anchor (if exists)
-    anchor_clip = None
+    for i, story in enumerate(stories):
+        # Pick a random loaded background and slice it
+        chosen_bg = random.choice(loaded_bgs)
+        if isinstance(chosen_bg, ColorClip):
+            bg_segment = chosen_bg.set_duration(segment_duration).set_start(i * segment_duration)
+        else:
+            if chosen_bg.duration < segment_duration + 1:
+                bg_segment = chosen_bg.loop(duration=segment_duration).subclip(0, segment_duration).set_start(i * segment_duration)
+            else:
+                # Pick a random start time to keep it fresh
+                max_start = max(0, chosen_bg.duration - segment_duration)
+                start_t = random.uniform(0, max_start)
+                bg_segment = chosen_bg.subclip(start_t, start_t + segment_duration).set_start(i * segment_duration)
+        bg_clips.append(bg_segment)
+        
+        # Create overlay with PPT crossfade
+        overlay_path = f"overlay_{i}.png"
+        create_overlay(story["title"], i+1, overlay_path)
+        clip_duration = segment_duration + 1.0 if i < len(stories) - 1 else segment_duration
+        clip = ImageClip(overlay_path).set_duration(clip_duration).set_start(i * segment_duration)
+        if i > 0: clip = clip.crossfadein(1.0)
+        overlay_clips.append(clip)
+
+    final_clips = bg_clips + overlay_clips
+
+    # 2. Add Scrolling Ticker Tape
+    headlines = [s["title"] for s in stories]
+    create_ticker_image(headlines, "ticker.png")
+    ticker_img = ImageClip("ticker.png").set_duration(120)
+    # Scroll from right to left
+    # We need to calculate the scroll speed. Image width / 120 seconds.
+    scroll_speed = ticker_img.w / 120.0 
+    ticker_clip = ticker_img.set_position(lambda t: (1080 - (t * scroll_speed * 10) % (ticker_img.w + 1080), 1820)).set_duration(120)
+    final_clips.append(ticker_clip)
+
+    # 3. Add Green Screen Anchor (if exists)
     if os.path.exists(ANCHOR_VIDEO):
         print(f"👤 Loading green screen anchor: {ANCHOR_VIDEO}")
         try:
             anchor = VideoFileClip(ANCHOR_VIDEO).without_audio()
-            # Loop to match total duration (120s)
             anchor = anchor.loop(duration=120).set_duration(120)
-            # Resize to fit in the top right corner (e.g., width 400px)
             anchor = anchor.resize(width=400)
-            # Apply Chroma Key (remove green)
-            anchor_clip = anchor.fx(vfx.mask_color, color=[0, 255, 0], thr=100, s=5).set_position((640, 150)).set_duration(120)
+            # More aggressive chroma key
+            anchor_clip = anchor.fx(vfx.mask_color, color=[0, 255, 0], thr=150, s=5).set_position((640, 150)).set_duration(120)
+            final_clips.append(anchor_clip)
         except Exception as e:
             print(f"⚠️ Anchor video failed to load: {e}")
-
-    for i, story in enumerate(stories):
-        # 2. Pick a random background for THIS story
-        bg_path = random.choice(bg_files)
-        print(f"🎥 News {i+1} using background: {bg_path}")
-        
-        try:
-            bg_segment = VideoFileClip(bg_path).without_audio()
-            bg_segment = bg_segment.crop(x_center=bg_segment.w / 2, width=1080, height=1920)
-            if bg_segment.duration < segment_duration:
-                bg_segment = bg_segment.loop(duration=segment_duration)
-            bg_segment = bg_segment.subclip(0, segment_duration).set_start(i * segment_duration)
-        except Exception as e:
-            print(f"⚠️ Background video failed. Using solid color. Error: {e}")
-            bg_segment = ColorClip(size=(1080, 1920), color=(15, 15, 25), duration=segment_duration).set_start(i * segment_duration)
-            
-        bg_clips.append(bg_segment)
-        
-        # 3. Create overlay with PPT crossfade
-        overlay_path = f"overlay_{i}.png"
-        create_overlay(story["title"], i+1, overlay_path)
-        
-        clip_duration = segment_duration + 1.0 if i < len(stories) - 1 else segment_duration
-        clip = ImageClip(overlay_path).set_duration(clip_duration).set_start(i * segment_duration)
-        
-        if i > 0:
-            clip = clip.crossfadein(1.0)
-            
-        overlay_clips.append(clip)
-
-    # Combine Backgrounds + Overlays + Anchor
-    final_clips = bg_clips + overlay_clips
-    if anchor_clip:
-        final_clips.append(anchor_clip)
 
     final = CompositeVideoClip(final_clips, size=(1080, 1920)).set_duration(120)
 
@@ -309,39 +315,22 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
         ffmpeg_exe = "ffmpeg"
 
     merge_success = False
-    
     if os.path.exists(INTRO_MUSIC) and os.path.getsize(INTRO_MUSIC) > 0:
         cmd_with_music = [
-            ffmpeg_exe, "-y",
-            "-i", "silent_video.mp4",
-            "-i", voiceover_path,
-            "-i", INTRO_MUSIC,
+            ffmpeg_exe, "-y", "-i", "silent_video.mp4", "-i", voiceover_path, "-i", INTRO_MUSIC,
             "-filter_complex", "[1:a]volume=1.0[a1];[2:a]volume=0.1[a2];[a1][a2]amix=inputs=2:duration=first[aout]",
-            "-map", "0:v", "-map", "[aout]",
-            "-c:v", "copy", "-c:a", "aac",
-            "-shortest", output_path
+            "-map", "0:v", "-map", "[aout]", "-c:v", "copy", "-c:a", "aac", "-shortest", output_path
         ]
         subprocess.run(cmd_with_music)
-        
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            merge_success = True
-        else:
-            print("⚠️ Music file is corrupted! Falling back to voice only...")
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0: merge_success = True
+        else: print("⚠️ Music file is corrupted! Falling back to voice only...")
 
     if not merge_success:
-        cmd_voice_only = [
-            ffmpeg_exe, "-y",
-            "-i", "silent_video.mp4",
-            "-i", voiceover_path,
-            "-map", "0:v", "-map", "1:a",
-            "-c:v", "copy", "-c:a", "aac",
-            "-shortest", output_path
-        ]
+        cmd_voice_only = [ffmpeg_exe, "-y", "-i", "silent_video.mp4", "-i", voiceover_path, "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-shortest", output_path]
         subprocess.run(cmd_voice_only)
 
-    for f in ["voice.mp3", "silent_video.mp4"] + [f"overlay_{i}.png" for i in range(len(stories))]:
-        if os.path.exists(f):
-            os.remove(f)
+    for f in ["voice.mp3", "silent_video.mp4", "ticker.png"] + [f"overlay_{i}.png" for i in range(len(stories))]:
+        if os.path.exists(f): os.remove(f)
 
 # ----------------------------------------------------------------------
 # 5. UPLOAD TO YOUTUBE
@@ -351,40 +340,23 @@ def upload_to_youtube(video_path, thumb_path, title, description, tags):
     token_json = os.environ.get("YOUTUBE_TOKEN")
     if not token_json:
         if os.path.exists("token.json"):
-            with open("token.json", "r") as f:
-                token_json = f.read()
-        else:
-            raise Exception("YOUTUBE_TOKEN env var or token.json missing")
+            with open("token.json", "r") as f: token_json = f.read()
+        else: raise Exception("YOUTUBE_TOKEN env var or token.json missing")
 
     token_data = json.loads(token_json)
     creds = Credentials.from_authorized_user_info(token_data)
-
     youtube = build("youtube", "v3", credentials=creds)
 
     body = {
-        "snippet": {
-            "title": title[:100],
-            "description": description,
-            "tags": tags,
-            "categoryId": "28"
-        },
-        "status": {
-            "privacyStatus": "public",
-            "selfDeclaredMadeForKids": False
-        }
+        "snippet": {"title": title[:100], "description": description, "tags": tags, "categoryId": "28"},
+        "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False}
     }
-
-    request = youtube.videos().insert(
-        part="snippet,status",
-        body=body,
-        media_body=MediaFileUpload(video_path, chunksize=-1, resumable=True)
-    )
+    request = youtube.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(video_path, chunksize=-1, resumable=True))
 
     response = None
     while response is None:
         status, response = request.next_chunk()
-        if status:
-            print(f"   Upload progress: {int(status.progress() * 100)}%")
+        if status: print(f"   Upload progress: {int(status.progress() * 100)}%")
 
     video_id = response['id']
     print(f"✅ Uploaded! Video ID: {video_id}")
@@ -393,14 +365,10 @@ def upload_to_youtube(video_path, thumb_path, title, description, tags):
     if os.path.exists(thumb_path):
         print("🖼️ Uploading custom thumbnail...")
         try:
-            youtube.thumbnails().set(
-                videoId=video_id,
-                media_body=MediaFileUpload(thumb_path)
-            ).execute()
+            youtube.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(thumb_path)).execute()
             print("✅ Thumbnail uploaded successfully!")
         except Exception as e:
             print(f"⚠️ Thumbnail upload failed: {e}")
-            
     return video_id
 
 # ----------------------------------------------------------------------
@@ -423,8 +391,7 @@ if __name__ == "__main__":
     date_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     title = f"Top {len(stories)} AI News Stories - {date_str}"
     description = "In today's AI news:\n\n"
-    for i, story in enumerate(stories):
-        description += f"{i+1}. {story['title']}\n"
+    for i, story in enumerate(stories): description += f"{i+1}. {story['title']}\n"
     description += f"\n🔔 Subscribe to {CHANNEL_NAME} for daily AI news updates.\n#AI #ArtificialIntelligence #MachineLearning #TechNews"
 
     tags = ["AI", "Artificial Intelligence", "AI News", "Machine Learning", "OpenAI", "Tech News"]
@@ -432,6 +399,5 @@ if __name__ == "__main__":
     upload_to_youtube(video_file, thumb_file, title, description, tags)
 
     for f in [video_file, thumb_file]:
-        if os.path.exists(f):
-            os.remove(f)
+        if os.path.exists(f): os.remove(f)
     print("🎉 Done! Video live on YouTube.")
