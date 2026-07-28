@@ -29,7 +29,7 @@ CHANNEL_NAME = "AI News Daily"
 NUM_STORIES = 5
 FONT_PATH = "Roboto-Bold.ttf"
 INTRO_MUSIC = "intro_music.mp3"
-SFX_TRANSITION = "sfx_whoosh.mp3"  # New Sound Effect
+SFX_TRANSITION = "sfx_whoosh.mp3"
 USED_FILE = "used_articles.txt"
 
 # ----------------------------------------------------------------------
@@ -90,7 +90,6 @@ async def generate_story_audio(text, filename):
     await communicate.save(filename)
 
 def build_final_audio(num_stories):
-    """Stitches voice_1.mp3 + sfx_whoosh.mp3 + voice_2.mp3 ... into voice.mp3"""
     print("🎵 Stitching audio and sound effects together...")
     try:
         import imageio_ffmpeg
@@ -98,26 +97,23 @@ def build_final_audio(num_stories):
     except ImportError:
         ffmpeg_exe = "ffmpeg"
 
-    # Create a text file that tells FFmpeg the order of audio files
     with open("audio_list.txt", "w") as f:
         for i in range(num_stories):
             f.write(f"file 'voice_{i}.mp3'\n")
-            if i < num_stories - 1:  # Don't add whoosh after the last story
+            if i < num_stories - 1:
                 if os.path.exists(SFX_TRANSITION):
                     f.write(f"file '{SFX_TRANSITION}'\n")
     
-    # Run FFmpeg to concatenate them
     cmd = [ffmpeg_exe, "-y", "-f", "concat", "-safe", "0", "-i", "audio_list.txt", "-c:a", "libmp3lame", "-b:a", "48k", "voice.mp3"]
     subprocess.run(cmd)
     
-    # Cleanup individual files
     if os.path.exists("audio_list.txt"): os.remove("audio_list.txt")
     for i in range(num_stories):
         if os.path.exists(f"voice_{i}.mp3"): os.remove(f"voice_{i}.mp3")
     print("✅ Final voiceover with SFX created.")
 
 # ----------------------------------------------------------------------
-# 3. CREATE OVERLAY GRAPHICS
+# 3. CREATE OVERLAY GRAPHICS & THUMBNAIL
 # ----------------------------------------------------------------------
 def wrap_text(text, font, max_width):
     lines = []
@@ -138,7 +134,7 @@ def wrap_text(text, font, max_width):
     return lines
 
 def create_overlay(headline, story_num, output_path="overlay.png"):
-    print(f"🎨 Creating news overlay for Story {story_num}...")
+    print(f"🎨 Creating news overlay for News {story_num}...")
     W, H = 1080, 1920
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -158,8 +154,9 @@ def create_overlay(headline, story_num, output_path="overlay.png"):
     banner_top = 1480
     draw.rectangle([(0, banner_top), (W, H)], fill=(0, 0, 0, 200))
 
-    draw.rectangle([(40, banner_top + 30), (400, banner_top + 90)], fill=(220, 0, 0))
-    draw.text((55, banner_top + 35), f"STORY {story_num}", fill=(255, 255, 255), font=font_label)
+    # Changed "STORY" to "NEWS"
+    draw.rectangle([(40, banner_top + 30), (380, banner_top + 90)], fill=(220, 0, 0))
+    draw.text((55, banner_top + 35), f"NEWS {story_num}", fill=(255, 255, 255), font=font_label)
 
     wrapped = wrap_text(headline, font_title, W - 80)
     y = banner_top + 120
@@ -168,6 +165,43 @@ def create_overlay(headline, story_num, output_path="overlay.png"):
         y += 65
 
     img.save(output_path)
+
+def create_thumbnail(stories, output_path="thumbnail.jpg"):
+    print("🖼️ Creating custom YouTube thumbnail...")
+    W, H = 1280, 720
+    img = Image.new("RGB", (W, H), (10, 10, 20)) # Dark background
+    draw = ImageDraw.Draw(img)
+
+    try:
+        font_huge = ImageFont.truetype(FONT_PATH, 70)
+        font_med = ImageFont.truetype(FONT_PATH, 45)
+        font_small = ImageFont.truetype(FONT_PATH, 35)
+    except Exception:
+        font_huge = ImageFont.load_default()
+        font_med = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+
+    # Top Red Banner
+    draw.rectangle([(0, 0), (W, 90)], fill=(220, 0, 0))
+    draw.text((40, 20), f"🔴 LIVE  |  {CHANNEL_NAME}", fill=(255, 255, 255), font=font_med)
+
+    # Top 3 Headlines
+    y = 140
+    for i in range(min(3, len(stories))):
+        # News Number Badge
+        draw.rectangle([(40, y), (110, y+70)], fill=(220, 0, 0))
+        draw.text((50, y+10), str(i+1), fill=(255, 255, 255), font=font_huge)
+        
+        # Headline Text (Yellow for clickability)
+        wrapped = wrap_text(stories[i]["title"], font_med, W - 180)
+        text_y = y + 10
+        for line in wrapped[:2]: # Max 2 lines per headline
+            draw.text((130, text_y), line, fill=(255, 255, 0), font=font_med)
+            text_y += 50
+        y += 180
+
+    img.save(output_path, "JPEG", quality=90)
+    print("✅ Thumbnail saved.")
 
 # ----------------------------------------------------------------------
 # 4. BUILD FINAL VIDEO
@@ -254,9 +288,9 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
             os.remove(f)
 
 # ----------------------------------------------------------------------
-# 5. UPLOAD TO YOUTUBE
+# 5. UPLOAD TO YOUTUBE (WITH THUMBNAIL)
 # ----------------------------------------------------------------------
-def upload_to_youtube(video_path, title, description, tags):
+def upload_to_youtube(video_path, thumb_path, title, description, tags):
     print("📤 Uploading to YouTube...")
     token_json = os.environ.get("YOUTUBE_TOKEN")
     if not token_json:
@@ -296,9 +330,23 @@ def upload_to_youtube(video_path, title, description, tags):
         if status:
             print(f"   Upload progress: {int(status.progress() * 100)}%")
 
-    print(f"✅ Uploaded! Video ID: {response['id']}")
-    print(f"🔗 https://youtube.com/watch?v={response['id']}")
-    return response["id"]
+    video_id = response['id']
+    print(f"✅ Uploaded! Video ID: {video_id}")
+    print(f"🔗 https://youtube.com/watch?v={video_id}")
+
+    # Upload Custom Thumbnail
+    if os.path.exists(thumb_path):
+        print("🖼️ Uploading custom thumbnail...")
+        try:
+            youtube.thumbnails().set(
+                videoId=video_id,
+                media_body=MediaFileUpload(thumb_path)
+            ).execute()
+            print("✅ Thumbnail uploaded successfully!")
+        except Exception as e:
+            print(f"⚠️ Thumbnail upload failed (Channel may require verification): {e}")
+            
+    return video_id
 
 # ----------------------------------------------------------------------
 # MAIN
@@ -306,13 +354,15 @@ def upload_to_youtube(video_path, title, description, tags):
 if __name__ == "__main__":
     stories = fetch_ai_news()
     
-    # 1. Generate individual voiceovers for each story
+    # 1. Generate audio
     for i, story in enumerate(stories):
-        script = f"Story number {i+1}. {story['title']}. {story['summary']} "
+        script = f"News number {i+1}. {story['title']}. {story['summary']} "
         asyncio.run(generate_story_audio(script, f"voice_{i}.mp3"))
-    
-    # 2. Stitch them together with the Whoosh sound effect
     build_final_audio(len(stories))
+
+    # 2. Generate Thumbnail
+    thumb_file = "thumbnail.jpg"
+    create_thumbnail(stories, thumb_file)
 
     # 3. Build Video
     video_file = "final_video.mp4"
@@ -328,8 +378,10 @@ if __name__ == "__main__":
 
     tags = ["AI", "Artificial Intelligence", "AI News", "Machine Learning", "OpenAI", "Tech News"]
 
-    upload_to_youtube(video_file, title, description, tags)
+    upload_to_youtube(video_file, thumb_file, title, description, tags)
 
-    if os.path.exists(video_file):
-        os.remove(video_file)
+    # Cleanup
+    for f in [video_file, thumb_file]:
+        if os.path.exists(f):
+            os.remove(f)
     print("🎉 Done! Video live on YouTube.")
