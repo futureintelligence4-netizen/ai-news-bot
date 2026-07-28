@@ -150,10 +150,11 @@ def create_overlay(headline, story_num, output_path="overlay.png"):
 # ----------------------------------------------------------------------
 def build_video(stories, voiceover_path, output_path="final_video.mp4"):
     print("🎬 Building silent video with MoviePy...")
+
+    bg_files = glob.glob("*.mp4") + glob.glob("assets/*.mp4")
+if not bg_files:
+    raise Exception("No .mp4 files found anywhere in the repo!")
     
-    bg_files = glob.glob(os.path.join(BACKGROUND_DIR, "background*.mp4"))
-    if not bg_files:
-        raise Exception("No background videos found in assets/")
     bg_path = random.choice(bg_files)
 
     # Create an overlay image for each story
