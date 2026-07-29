@@ -29,3 +29,8 @@ AI’s finally expensive enough to make Wall Street nervous
 In Bone Imaging, Machine Learning Accelerates Research Progress and Uncovers Hidden Patterns - University of Colorado Anschutz
 OpenAI’s Hugging Face breach has reignited the debate over alignment and control
 Threads users can now chat with Meta AI in their DMs
+We’re running out of reasons to ignore AI safety
+OpenAI CEO Sam Altman says AI has entered the singularity — two weeks after OpenAI models cheated a benchmark by hacking Hugging Face - Tom's Hardware
+OpenAI’s rogue AI agent didn’t stop at hacking Hugging Face
+OpenAI's rogue models roamed the internet for 4 days and staged a second attack - Politico
+IIIT Hyderabad’s iHub-Data opens admissions for six-month AI and Machine Learning programme - Telangana Today
