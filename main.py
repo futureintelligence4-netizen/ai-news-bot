@@ -296,7 +296,6 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
         if vert_img_path:
             bg_segment = ImageClip(vert_img_path).set_duration(segment_duration).set_start(i * segment_duration)
             # Add subtle zoom effect
-            bg_segment = bg_segment.resize(lambda t: 1 + 0.02 * (t / segment_duration))
         else:
             print(f"⚠️ Using solid color fallback for News {i+1}")
             bg_segment = ColorClip(size=(1080, 1920), color=(15, 15, 25), duration=segment_duration).set_start(i * segment_duration)
