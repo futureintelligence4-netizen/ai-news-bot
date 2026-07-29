@@ -94,11 +94,10 @@ def save_used_article(title):
     with open(USED_FILE, "a", encoding="utf-8") as f: f.write(title + "\n")
 
 # ----------------------------------------------------------------------
-# 2. AI IMAGE GENERATION (Pollinations.ai)
+# 2. AI IMAGE GENERATION
 # ----------------------------------------------------------------------
 def generate_ai_image(headline, output_path):
     print(f"🖼️ Generating AI image for: {headline[:30]}...")
-    # Create a detailed prompt for the AI
     prompt = f"{headline}, futuristic technology, artificial intelligence, digital art, cinematic lighting, 4k, no text"
     encoded_prompt = urllib.parse.quote(prompt)
     url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
@@ -118,7 +117,6 @@ def generate_ai_image(headline, output_path):
         return False
 
 def format_image_vertical(input_path, output_path):
-    """Crops and resizes the AI image to perfectly fit 1080x1920."""
     try:
         img = Image.open(input_path).convert("RGB")
         width, height = img.size
@@ -273,7 +271,7 @@ def create_thumbnail(stories, bg_image_path, output_path="thumbnail.jpg"):
     img.save(output_path, "JPEG", quality=90)
 
 # ----------------------------------------------------------------------
-# 5. BUILD FINAL VIDEO (AI IMAGES + ANCHOR + TICKER)
+# 5. BUILD FINAL VIDEO (FIXED TICKER + FIXED ANCHOR)
 # ----------------------------------------------------------------------
 def build_video(stories, voiceover_path, output_path="final_video.mp4"):
     print("🎬 Building silent video with MoviePy...")
@@ -282,7 +280,6 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
     bg_clips = []
     overlay_clips = []
     
-    # Generate AI Images for all stories first
     for i, story in enumerate(stories):
         raw_img_path = f"raw_bg_{i}.png"
         vert_img_path = f"bg_{i}.png"
@@ -291,11 +288,10 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
             format_image_vertical(raw_img_path, vert_img_path)
             if os.path.exists(raw_img_path): os.remove(raw_img_path)
         else:
-            vert_img_path = None # Fallback
+            vert_img_path = None 
             
         if vert_img_path:
             bg_segment = ImageClip(vert_img_path).set_duration(segment_duration).set_start(i * segment_duration)
-            # Add subtle zoom effect
         else:
             print(f"⚠️ Using solid color fallback for News {i+1}")
             bg_segment = ColorClip(size=(1080, 1920), color=(15, 15, 25), duration=segment_duration).set_start(i * segment_duration)
@@ -311,25 +307,30 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
 
     final_clips = bg_clips + overlay_clips
 
-    # Add Scrolling Ticker Tape
+    # 1. Fixed Scrolling Ticker Tape (Slowed down to 100 pixels per second)
     headlines = [s["title"] for s in stories]
     create_ticker_image(headlines, "ticker.png")
     ticker_img = ImageClip("ticker.png").set_duration(120)
-    scroll_speed = ticker_img.w / 120.0 
-    ticker_clip = ticker_img.set_position(lambda t: (1080 - (t * scroll_speed * 10) % (ticker_img.w + 1080), 1820)).set_duration(120)
+    # Calculate speed so it takes exactly 20 seconds to scroll one full screen
+    scroll_speed = (ticker_img.w + 1080) / 20.0 
+    ticker_clip = ticker_img.set_position(lambda t: (1080 - (t * scroll_speed) % (ticker_img.w + 1080), 1820)).set_duration(120)
     final_clips.append(ticker_clip)
 
-    # Add Green Screen Anchor
+    # 2. Fixed Green Screen Anchor (Fixed chroma key threshold)
     if os.path.exists(ANCHOR_VIDEO):
         print(f"👤 Loading green screen anchor: {ANCHOR_VIDEO}")
         try:
             anchor = VideoFileClip(ANCHOR_VIDEO).without_audio()
             anchor = anchor.loop(duration=120).set_duration(120)
             anchor = anchor.resize(width=400)
-            anchor_clip = anchor.fx(vfx.mask_color, color=[0, 255, 0], thr=150, s=5).set_position((640, 150)).set_duration(120)
+            # thr=50 means it only removes pure green, keeping the anchor perfectly visible
+            anchor_clip = anchor.fx(vfx.mask_color, color=[0, 255, 0], thr=50, s=5).set_position((640, 150)).set_duration(120)
             final_clips.append(anchor_clip)
+            print("✅ Anchor loaded and green screen removed!")
         except Exception as e:
             print(f"⚠️ Anchor video failed to load: {e}")
+    else:
+        print("⚠️ anchor.mp4 not found in repository.")
 
     final = CompositeVideoClip(final_clips, size=(1080, 1920)).set_duration(120)
 
@@ -365,7 +366,6 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
         cmd_voice_only = [ffmpeg_exe, "-y", "-i", "silent_video.mp4", "-i", voiceover_path, "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-shortest", output_path]
         subprocess.run(cmd_voice_only)
 
-    # Cleanup images
     for f in ["voice.mp3", "silent_video.mp4", "ticker.png"] + [f"overlay_{i}.png" for i in range(len(stories))] + [f"bg_{i}.png" for i in range(len(stories))]:
         if os.path.exists(f): os.remove(f)
 
@@ -419,9 +419,8 @@ if __name__ == "__main__":
         asyncio.run(generate_story_audio(script, f"voice_{i}.mp3"))
     build_final_audio(len(stories))
 
-    # Generate AI Image for Top Story to use as Thumbnail Background
     thumb_bg_raw = "thumb_bg_raw.png"
-    thumb_bg_vert = "bg_0.png" # Reuse the first story's background for the thumbnail
+    thumb_bg_vert = "bg_0.png" 
     if not os.path.exists(thumb_bg_vert):
         if generate_ai_image(stories[0]["title"], thumb_bg_raw):
             format_image_vertical(thumb_bg_raw, thumb_bg_vert)
