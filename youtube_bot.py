@@ -13,7 +13,8 @@ from moviepy.editor import (
     VideoFileClip, ImageClip, AudioFileClip, CompositeVideoClip,
     TextClip, ColorClip, CompositeAudioClip
 )
-from moviepy.video.fx.all import colorx, volumex
+from moviepy.video.fx.all import colorx
+from moviepy.audio.fx.all import volumex
 from PIL import Image, ImageDraw, ImageFont
 
 # --- CONFIGURATION ---
