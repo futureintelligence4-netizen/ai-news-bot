@@ -1,481 +1,284 @@
 import os
 import asyncio
-import random
-import json
-import glob
 import subprocess
-import urllib.parse
 import requests
-from datetime import datetime
-
+import datetime
+import json
 import feedparser
+import pytz
 import edge_tts
-from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip
+import google.generativeai as genai
+from moviepy.editor import (
+    VideoFileClip, ImageClip, AudioFileClip, CompositeVideoClip,
+    TextClip, ColorClip, CompositeAudioClip
+)
+from moviepy.video.fx.all import colorx, volumex
 from PIL import Image, ImageDraw, ImageFont
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from google.oauth2.credentials import Credentials
 
-# ----------------------------------------------------------------------
-# CONFIG
-# ----------------------------------------------------------------------
-RSS_FEEDS = [
-    "https://news.google.com/rss/search?q=artificial+intelligence&hl=en-US&gl=US&ceid=US:en",
-    "https://news.google.com/rss/search?q=machine+learning+news&hl=en-US&gl=US&ceid=US:en",
-    "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
-    "https://techcrunch.com/category/artificial-intelligence/feed/",
-]
+# --- CONFIGURATION ---
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
-VOICE = "en-US-GuyNeural"
-CHANNEL_NAME = "AI News Daily"
-NUM_STORIES = 5
-FONT_PATH = "Roboto-Bold.ttf"
-INTRO_MUSIC = "intro_music.mp3"
-SFX_TRANSITION = "sfx_whoosh.mp3"
-ANCHOR_VIDEO = "anchor.mp4" 
-USED_FILE = "used_articles.txt"
+LANGUAGES = {
+    "English": {"tts": "en-IN-NeerjaNeural", "gemini_lang": "Indian English", "font": "Noto Sans Bold"},
+    "Hindi": {"tts": "hi-IN-SwaraNeural", "gemini_lang": "Hindi", "font": "Noto Sans Devanagari Bold"},
+    "Tamil": {"tts": "ta-IN-PallaviNeural", "gemini_lang": "Tamil", "font": "Noto Sans Tamil Bold"},
+    "Telugu": {"tts": "te-IN-ShrutiNeural", "gemini_lang": "Telugu", "font": "Noto Sans Telugu Bold"},
+    "Malayalam": {"tts": "ml-IN-SobhanaNeural", "gemini_lang": "Malayalam", "font": "Noto Sans Malayalam Bold"},
+    "Kannada": {"tts": "kn-IN-SapnaNeural", "gemini_lang": "Kannada", "font": "Noto Sans Kannada Bold"}
+}
 
-# ----------------------------------------------------------------------
-# 1. FETCH AI NEWS & SCORE BY PRIORITY
-# ----------------------------------------------------------------------
-def score_article(article):
-    score = 10
-    text = (article['title'] + " " + article['summary']).lower()
-    high_priority = ["openai", "chatgpt", "anthropic", "gemini", "google", "apple", "microsoft", "meta", "nvidia", "breakthrough", "billion", "funding", "launches", "gpt-4", "agi"]
-    for kw in high_priority:
-        if kw in text: score += 5
-    med_priority = ["ai", "machine learning", "robot", "model", "tech", "data", "automation", "cybersecurity"]
-    for kw in med_priority:
-        if kw in text: score += 2
-    if len(article['summary']) < 100: score -= 3
-    return score
+BLOCKED_KEYWORDS = ["war", "dead", "death", "kill", "attack", "suicide", "terror", "blood", "gore", "shoot", "bomb", "tragedy", "casualt"]
 
-def fetch_ai_news():
-    print(f"📰 Fetching AI news to find the top {NUM_STORIES} priority stories...")
-    all_articles = []
-    for url in RSS_FEEDS:
-        try:
-            feed = feedparser.parse(url)
-            for article in feed.entries[:30]:
-                title = article.title.strip()
-                summary = ""
-                if 'summary' in article: summary = article.summary.strip()
-                elif 'description' in article: summary = article.description.strip()
-                import re
-                summary = re.sub(r'<[^>]+>', '', summary)
-                if title and len(title) > 15:
-                    all_articles.append({"title": title, "summary": summary})
-        except Exception as e:
-            print(f"⚠️ Failed to fetch {url}: {e}")
-
-    used = load_used_articles()
-    fresh = [a for a in all_articles if a["title"] not in used]
-    if not fresh: fresh = all_articles
-
-    for article in fresh: article['score'] = score_article(article)
-    fresh.sort(key=lambda x: x['score'], reverse=True)
-
-    num_to_select = min(NUM_STORIES, len(fresh))
-    chosen = fresh[:num_to_select]
-    
-    for story in chosen: save_used_article(story["title"])
-        
-    print(f"✅ Selected Top {len(chosen)} Priority Stories!")
-    for i, story in enumerate(chosen):
-        print(f"   {i+1}. [Score: {story['score']}] {story['title']}")
-    return chosen
-
-def load_used_articles():
-    if not os.path.exists(USED_FILE): return set()
-    with open(USED_FILE, "r", encoding="utf-8") as f:
-        return set(line.strip() for line in f.readlines()[-200:])
-
-def save_used_article(title):
-    with open(USED_FILE, "a", encoding="utf-8") as f: f.write(title + "\n")
-
-# ----------------------------------------------------------------------
-# 2. AI IMAGE GENERATION
-# ----------------------------------------------------------------------
-def generate_ai_image(headline, output_path):
-    print(f"🖼️ Generating AI image for: {headline[:30]}...")
-    prompt = f"{headline}, futuristic technology, artificial intelligence, digital art, cinematic lighting, 4k, no text"
-    encoded_prompt = urllib.parse.quote(prompt)
-    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-    
+# --- 0. DYNAMIC ASSET FETCHERS & UTILITIES ---
+def get_system_font(font_name):
     try:
-        response = requests.get(url, timeout=45)
-        if response.status_code == 200:
-            with open(output_path, "wb") as f:
-                f.write(response.content)
-            print("✅ AI Image generated.")
-            return True
-        else:
-            print(f"⚠️ Image generation failed (Status {response.status_code})")
-            return False
-    except Exception as e:
-        print(f"⚠️ Image generation failed: {e}")
-        return False
+        result = subprocess.run(['fc-match', '-f', '%{file}', font_name], capture_output=True, text=True)
+        if result.stdout and result.stdout.strip(): return result.stdout.strip()
+    except Exception: pass
+    return "Roboto-Bold.ttf"
 
-def format_image_vertical(input_path, output_path):
+def fetch_background_music():
+    print("🎵 Fetching background music...")
+    url = "https://www.soundjay.com/buttons/sounds/button-2.mp3" # Placeholder for CC0 music
     try:
-        img = Image.open(input_path).convert("RGB")
-        width, height = img.size
-        target_ratio = 1080 / 1920
-        current_ratio = width / height
-
-        if current_ratio > target_ratio:
-            new_width = int(height * target_ratio)
-            left = (width - new_width) / 2
-            img = img.crop((left, 0, left + new_width, height))
-        else:
-            new_height = int(width / target_ratio)
-            top = (height - new_height) / 2
-            img = img.crop((0, top, width, top + new_height))
-
-        img = img.resize((1080, 1920))
-        img.save(output_path, "PNG")
+        r = requests.get(url, timeout=10)
+        with open("news_theme.mp3", "wb") as f: f.write(r.content)
         return True
-    except Exception as e:
-        print(f"⚠️ Image formatting failed: {e}")
-        return False
+    except: return False
 
-# ----------------------------------------------------------------------
-# 3. TEXT-TO-SPEECH & AUDIO ENGINE
-# ----------------------------------------------------------------------
-async def generate_story_audio(text, filename):
-    print(f"🎙️ Generating voiceover for: {text[:40]}...")
-    communicate = edge_tts.Communicate(text, voice=VOICE)
-    await communicate.save(filename)
-
-def build_final_audio(num_stories):
-    print("🎵 Stitching audio and sound effects together...")
+def fetch_background_video():
+    print("🎥 Fetching dynamic background video...")
+    headers = {"Authorization": os.environ.get("PEXELS_API_KEY")}
     try:
-        import imageio_ffmpeg
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    except ImportError:
-        ffmpeg_exe = "ffmpeg"
+        r = requests.get("https://api.pexels.com/videos/search?query=technology&per_page=1", headers=headers, timeout=15)
+        if r.status_code == 200 and r.json()['videos']:
+            video_url = r.json()['videos'][0]['video_files'][0]['link']
+            with open("background_clip.mp4", "wb") as f: f.write(requests.get(video_url).content)
+            return True
+    except: pass
+    ColorClip(size=(1920, 1080), color=(0,0,0)).set_duration(10).write_videofile("background_clip.mp4", fps=24)
+    return True
 
-    with open("audio_list.txt", "w") as f:
-        for i in range(num_stories):
-            f.write(f"file 'voice_{i}.mp3'\n")
-            if i < num_stories - 1:
-                if os.path.exists(SFX_TRANSITION): f.write(f"file '{SFX_TRANSITION}'\n")
+def is_safe(text):
+    for word in BLOCKED_KEYWORDS:
+        if word in text.lower(): return False
+    return True
+
+# --- 1. NEWS FETCHER (48h Memory & Safety Filter) ---
+def get_fresh_news():
+    print("📰 Fetching latest Future Intelligence news...")
+    url = "https://news.google.com/rss/search?q=artificial+intelligence+stocks+OR+crypto+news+OR+tech+business+latest+news&hl=en-US&gl=US&ceid=US:en"
+    feed = feedparser.parse(url)
     
-    cmd = [ffmpeg_exe, "-y", "-f", "concat", "-safe", "0", "-i", "audio_list.txt", "-c:a", "libmp3lame", "-b:a", "48k", "voice.mp3"]
-    subprocess.run(cmd)
-    if os.path.exists("audio_list.txt"): os.remove("audio_list.txt")
-    for i in range(num_stories):
-        if os.path.exists(f"voice_{i}.mp3"): os.remove(f"voice_{i}.mp3")
-    print("✅ Final voiceover with SFX created.")
-
-# ----------------------------------------------------------------------
-# 4. CREATE OVERLAY GRAPHICS, TICKER & THUMBNAIL
-# ----------------------------------------------------------------------
-def wrap_text(text, font, max_width):
-    lines = []
-    words = text.split()
-    current_line = ""
-    for word in words:
-        test_line = (current_line + " " + word).strip()
-        bbox = font.getbbox(test_line)
-        width = bbox[2] - bbox[0]
-        if width <= max_width: current_line = test_line
-        else:
-            if current_line: lines.append(current_line)
-            current_line = word
-    if current_line: lines.append(current_line)
-    return lines
-
-def create_overlay(headline, story_num, output_path="overlay.png"):
-    print(f"🎨 Creating news overlay for News {story_num}...")
-    W, H = 1080, 1920
-    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-
-    try:
-        font_title = ImageFont.truetype(FONT_PATH, 55)
-        font_label = ImageFont.truetype(FONT_PATH, 40)
-        font_channel = ImageFont.truetype(FONT_PATH, 32)
-    except Exception:
-        font_title = ImageFont.load_default()
-        font_label = ImageFont.load_default()
-        font_channel = ImageFont.load_default()
-
-    draw.rectangle([(0, 0), (W, 110)], fill=(0, 0, 0, 220))
-    draw.text((40, 35), f"🔴 LIVE  |  {CHANNEL_NAME}", fill=(255, 255, 255), font=font_channel)
-
-    banner_top = 1400
-    draw.rectangle([(0, banner_top), (W, 1820)], fill=(0, 0, 0, 200))
-
-    draw.rectangle([(40, banner_top + 30), (380, banner_top + 90)], fill=(220, 0, 0))
-    draw.text((55, banner_top + 35), f"NEWS {story_num}", fill=(255, 255, 255), font=font_label)
-
-    wrapped = wrap_text(headline, font_title, W - 80)
-    y = banner_top + 120
-    for line in wrapped[:5]:
-        draw.text((40, y), line, fill=(255, 255, 255), font=font_title)
-        y += 65
-
-    img.save(output_path)
-
-def create_ticker_image(headlines, output_path="ticker.png"):
-    print("🎟️ Creating scrolling ticker tape...")
-    text_content = "   🔴 BREAKING AI NEWS   •   " + "   •   ".join(headlines) + "   •   SUBSCRIBE FOR MORE AI UPDATES DAILY   •   "
-    try:
-        font = ImageFont.truetype(FONT_PATH, 40)
-    except Exception:
-        font = ImageFont.load_default()
-        
-    bbox = font.getbbox(text_content)
-    text_width = bbox[2] - bbox[0]
-    W = text_width + 200
-    H = 100
-    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    draw.rectangle([(0, 0), (W, H)], fill=(220, 0, 0, 255))
-    draw.text((50, 25), text_content, fill=(255, 255, 255), font=font)
-    img.save(output_path)
-
-def create_thumbnail(stories, bg_image_path, output_path="thumbnail.jpg"):
-    print("🖼️ Creating custom YouTube thumbnail...")
-    W, H = 1280, 720
-    try:
-        img = Image.open(bg_image_path).resize((W, H))
-    except:
-        img = Image.new("RGB", (W, H), (10, 10, 20))
-    
-    draw = ImageDraw.Draw(img, "RGBA")
-    draw.rectangle([(0, 0), (W, H)], fill=(0, 0, 0, 120))
-
-    try:
-        font_huge = ImageFont.truetype(FONT_PATH, 70)
-        font_med = ImageFont.truetype(FONT_PATH, 45)
-    except Exception:
-        font_huge = ImageFont.load_default()
-        font_med = ImageFont.load_default()
-
-    draw.rectangle([(0, 0), (W, 90)], fill=(220, 0, 0))
-    draw.text((40, 20), f"🔴 LIVE  |  {CHANNEL_NAME}", fill=(255, 255, 255), font=font_med)
-
-    y = 140
-    for i in range(min(3, len(stories))):
-        draw.rectangle([(40, y), (110, y+70)], fill=(220, 0, 0))
-        draw.text((50, y+10), str(i+1), fill=(255, 255, 255), font=font_huge)
-        wrapped = wrap_text(stories[i]["title"], font_med, W - 180)
-        text_y = y + 10
-        for line in wrapped[:2]:
-            draw.text((130, text_y), line, fill=(255, 255, 0), font=font_med)
-            text_y += 50
-        y += 180
-
-    img.save(output_path, "JPEG", quality=90)
-
-# ----------------------------------------------------------------------
-# 5. BULLETPROOF GREEN SCREEN ANCHOR
-# ----------------------------------------------------------------------
-def prepare_anchor_video():
-    """Uses raw FFmpeg to remove green screen. Much more reliable than MoviePy."""
-    if not os.path.exists(ANCHOR_VIDEO):
-        print("⚠️ anchor.mp4 not found.")
-        return None
-
-    print("🟢 Removing green screen from anchor using raw FFmpeg...")
-    try:
-        import imageio_ffmpeg
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    except ImportError:
-        ffmpeg_exe = "ffmpeg"
-
-    output_path = "anchor_transparent.mp4"
-    
-    # FFmpeg chroma key command. We scale it to 400px wide, loop it, and make green transparent.
-    cmd = [
-        ffmpeg_exe, "-y",
-        "-i", ANCHOR_VIDEO,
-        "-t", "120",  # Limit to 120 seconds
-        "-vf", "scale=400:-1,format=yuva420p,colorkey=0x00FF00:0.3:0.2",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        output_path
-    ]
-    
-    try:
-        subprocess.run(cmd, check=True)
-        print("✅ Anchor green screen removed successfully!")
-        return output_path
-    except subprocess.CalledProcessError as e:
-        print(f"⚠️ FFmpeg failed to process anchor: {e}")
-        return None
-
-# ----------------------------------------------------------------------
-# 6. BUILD FINAL VIDEO
-# ----------------------------------------------------------------------
-def build_video(stories, voiceover_path, output_path="final_video.mp4"):
-    print("🎬 Building silent video with MoviePy...")
-    
-    segment_duration = 120 / len(stories)
-    bg_clips = []
-    overlay_clips = []
-    
-    for i, story in enumerate(stories):
-        raw_img_path = f"raw_bg_{i}.png"
-        vert_img_path = f"bg_{i}.png"
-        
-        if generate_ai_image(story["title"], raw_img_path):
-            format_image_vertical(raw_img_path, vert_img_path)
-            if os.path.exists(raw_img_path): os.remove(raw_img_path)
-        else:
-            vert_img_path = None 
+    history = []
+    if os.path.exists("news_history.json"):
+        with open("news_history.json", "r") as f: history = json.load(f)
             
-        if vert_img_path:
-            bg_segment = ImageClip(vert_img_path).set_duration(segment_duration).set_start(i * segment_duration)
-        else:
-            print(f"⚠️ Using solid color fallback for News {i+1}")
-            bg_segment = ColorClip(size=(1080, 1920), color=(15, 15, 25), duration=segment_duration).set_start(i * segment_duration)
+    cutoff_time = datetime.datetime.now() - datetime.timedelta(hours=48)
+    history = [h for h in history if datetime.datetime.fromisoformat(h["timestamp"]) > cutoff_time]
+    
+    fresh_news = []
+    now = datetime.datetime.now()
+    
+    for entry in feed.entries:
+        pub_date = datetime.datetime(*entry.published_parsed[:6], tzinfo=pytz.UTC)
+        if (now - pub_date.replace(tzinfo=None)) > datetime.timedelta(hours=24): continue
             
-        bg_clips.append(bg_segment)
-        
-        overlay_path = f"overlay_{i}.png"
-        create_overlay(story["title"], i+1, overlay_path)
-        clip_duration = segment_duration + 1.0 if i < len(stories) - 1 else segment_duration
-        clip = ImageClip(overlay_path).set_duration(clip_duration).set_start(i * segment_duration)
-        if i > 0: clip = clip.crossfadein(1.0)
-        overlay_clips.append(clip)
+        title_clean = entry.title.split(" - ")[0]
+        if any(h["title"] == title_clean for h in history) or not is_safe(title_clean): continue
+            
+        fresh_news.append(title_clean)
+        history.append({"title": title_clean, "timestamp": now.isoformat()})
+        if len(fresh_news) >= 15: break
+            
+    with open("news_history.json", "w") as f: json.dump(history, f, indent=4)
+    return fresh_news
 
-    final_clips = bg_clips + overlay_clips
+# --- 2. GEMINI SCRIPT GENERATOR ---
+def generate_content(headlines, language_name, gemini_lang):
+    print(f"📝 Generating scripts & metadata for {language_name}...")
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    time_of_day = "morning" if datetime.datetime.now().hour < 12 else "evening"
+    
+    prompt = f"""
+    You are a top-tier prime-time news anchor for 'Future Intelligence News' in India.
+    Write a highly detailed 1,500+ word broadcast script in **{gemini_lang}** based on these latest headlines: {headlines}.
+    Do NOT translate literally. Write natively as a local news channel would speak.
+    
+    FOLLOW THIS EXACT BROADCAST STRUCTURE:
+    [INTRODUCTION] Welcome viewers. Mention date and {time_of_day} broadcast.
+    [HEADLINES] List top 3-4 stories in one sentence each.
+    [DETAILED NEWS] Go deep into each story (2-3 mins each). Provide context and future impact.
+    [CLOSING] Summarize biggest takeaway. Thank viewers.
+    [NEXT TIME HINT] Tease next broadcast.
+    
+    ALSO GENERATE:
+    1. A 150-word version of this script for a 60-second YouTube Short.
+    2. A YouTube Title (Max 70 chars), Description (with 0:00 Intro, 1:30 Story 1 chapters), and 5 Tags.
+    3. A short 5-8 word Breaking News Ticker text in {gemini_lang}.
+    
+    Format output strictly as:
+    [LONG_SCRIPT]
+    <script here>
+    [SHORT_SCRIPT]
+    <short script here>
+    [METADATA]
+    Title: ...
+    Description: ...
+    Tags: ...
+    [TICKER_TEXT]
+    <ticker text here>
+    """
+    return model.generate_content(prompt).text
 
-    # 1. Scrolling Ticker Tape
-    headlines = [s["title"] for s in stories]
-    create_ticker_image(headlines, "ticker.png")
-    ticker_img = ImageClip("ticker.png").set_duration(120)
-    scroll_speed = (ticker_img.w + 1080) / 20.0 
-    ticker_clip = ticker_img.set_position(lambda t: (1080 - (t * scroll_speed) % (ticker_img.w + 1080), 1820)).set_duration(120)
-    final_clips.append(ticker_clip)
+# --- 3. EDGE-TTS VOICE & SUBTITLES ---
+async def _generate_voice_async(text, tts_voice, srt_path, audio_path):
+    communicate = edge_tts.Communicate(text, tts_voice)
+    submaker = edge_tts.SubMaker()
+    with open(audio_path, "wb") as audio_file:
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio": audio_file.write(chunk["data"])
+            elif chunk["type"] == "WordBoundary": submaker.create_sub((chunk["offset"], chunk["duration"]), chunk["text"])
+    with open(srt_path, "w", encoding='utf-8') as f: f.write(submaker.generate_subs())
 
-    # 2. Add Pre-processed Green Screen Anchor
-    transparent_anchor_path = prepare_anchor_video()
-    if transparent_anchor_path:
-        print("👤 Loading transparent anchor into video...")
-        try:
-            anchor = VideoFileClip(transparent_anchor_path).without_audio()
-            if anchor.duration < 120:
-                anchor = anchor.loop(duration=120).set_duration(120)
-            anchor_clip = anchor.set_position((640, 150)).set_duration(120)
-            final_clips.append(anchor_clip)
-            print("✅ Anchor added to scene!")
-        except Exception as e:
-            print(f"⚠️ Failed to load transparent anchor into MoviePy: {e}")
+def generate_voice_and_subs(text, lang_name, tts_voice, prefix="temp"):
+    audio_path = f"{prefix}_voice_{lang_name}.mp3"
+    srt_path = f"subtitles_{lang_name}.srt" if prefix == "final" else f"{prefix}_subs_{lang_name}.srt"
+    asyncio.run(_generate_voice_async(text, tts_voice, srt_path, audio_path))
+    return audio_path, srt_path
 
-    final = CompositeVideoClip(final_clips, size=(1080, 1920)).set_duration(120)
+# --- 4. 8-MINUTE VALIDATION LOOP ---
+def generate_and_validate_voice(script, lang_name, gemini_lang, tts_voice, headlines):
+    max_attempts, attempt, current_script = 3, 0, script
+    while attempt < max_attempts:
+        audio_file, srt_file = generate_voice_and_subs(current_script, lang_name, tts_voice, "final")
+        duration = AudioFileClip(audio_file).duration
+        print(f"⏱️ Validation Check: Audio is {duration/60:.2f} minutes long.")
+        if duration >= 480:
+            print("✅ Success! Audio is 8+ minutes.")
+            return audio_file, srt_file
+        attempt += 1
+        print(f"⚠️ Failed validation. Requesting more content (Attempt {attempt})...")
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        extra = model.generate_content(f"The following {gemini_lang} script is too short. Add 500 words of deep analysis about {headlines} before the closing. Return ONLY the new text.\n\nScript: {current_script}").text
+        current_script = current_script.replace("[CLOSING]", f"{extra}\n\n[CLOSING]")
+        os.remove(audio_file); os.remove(srt_file)
+    return generate_voice_and_subs(current_script, lang_name, tts_voice, "final")
 
-    final.write_videofile(
-        "silent_video.mp4",
-        fps=24,
-        codec="libx264",
-        audio=False,
-        threads=4,
-        preset="ultrafast",
-        ffmpeg_params=["-pix_fmt", "yuv420p"]
-    )
+# --- 5. PRO VIDEO ASSEMBLY (LONG FORM) ---
+def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path, has_music):
+    print(f"🎬 Assembling Long-form {lang_name} Broadcast...")
+    audio = AudioFileClip(audio_file)
+    duration = audio.duration
 
-    print("🎵 Merging final audio and video using raw FFmpeg...")
+    bg = VideoFileClip("background_clip.mp4").resize(height=1080).crop(width=1920)
+    bg = bg.loop(duration=duration) if bg.duration < duration else bg.subclip(0, duration)
+    bg = bg.fx(colorx, 0.55)
+
+    if has_music and os.path.exists("news_theme.mp3"):
+        music = AudioFileClip("news_theme.mp3").fx(volumex, 0.15).audio_loop(duration=duration)
+        mixed_audio = CompositeAudioClip([audio, music])
+    else: mixed_audio = audio
+
+    anchor = ImageClip("my_photo.png").set_duration(duration).set_position(("right", "top")).resize(height=350)
+    logo = TextClip("FUTURE INTELLIGENCE NEWS", fontsize=36, color='white', font=font_path, stroke_color='black', stroke_width=2).set_duration(duration).set_position((20, 20))
+    
+    live_pulse = lambda t: 0.6 + 0.4 * abs((t % 2) - 1)
+    live_dot = ColorClip(size=(20, 20), color=(220, 0, 0)).set_duration(duration).set_position((20, 70))
+    live_text = TextClip("LIVE", fontsize=24, color='white', font=font_path, stroke_color='red', stroke_width=1).set_duration(duration).set_position((50, 68)).set_opacity(live_pulse)
+    
+    ist_time = datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)
+    clock = TextClip("00:00:00 IST", fontsize=22, color='white', font=font_path).set_duration(duration).set_position((20, 100))
+    clock = clock.set_text(lambda t: (ist_time + datetime.timedelta(seconds=t)).strftime("%H:%M:%S IST"))
+
+    ticker_bg = ColorClip(size=(1920, 80), color=(180, 0, 0)).set_duration(duration).set_position(("center", "bottom"))
+    ticker_label = TextClip("BREAKING", fontsize=36, color='black', font=font_path).set_duration(duration).set_position((10, 1010))
+    ticker_clip = TextClip(ticker_text, fontsize=38, color='white', font=font_path).set_duration(duration).set_position(lambda t: (1920 - 40 * t, 1010))
+
+    lower_thirds = []
+    for i, hl in enumerate(headlines[:3]):
+        start = 60 + (i * 120)
+        if start < duration:
+            lt_bg = ColorClip(size=(1000, 60), color=(0, 0, 0)).set_duration(20).set_position((20, 850)).set_opacity(0.8).set_start(start)
+            lt_text = TextClip(hl[:60] + "...", fontsize=28, color='yellow', font=font_path, stroke_color='black', stroke_width=1).set_duration(20).set_position((30, 855)).set_start(start)
+            lower_thirds.extend([lt_bg, lt_text])
+
+    final_video = CompositeVideoClip([bg, logo, live_dot, live_text, clock, anchor, ticker_bg, ticker_label, ticker_clip] + lower_thirds).set_audio(mixed_audio)
+    
+    output_file = f"final_news_{lang_name}.mp4"
+    final_video.write_videofile(output_file, codec="libx264", audio_codec="aac", fps=30, threads=4, preset="medium")
+    os.remove(audio_file)
+    return output_file
+
+# --- 6. SHORTS ASSEMBLY ---
+def assemble_shorts(short_script, lang_name, tts_voice, font_path):
+    print(f"📱 Assembling {lang_name} Short...")
+    audio_file = f"short_voice_{lang_name}.mp3"
+    asyncio.run(_generate_voice_async(short_script, tts_voice, f"short_subs_{lang_name}.srt", audio_file))
+    audio = AudioFileClip(audio_file)
+    duration = min(audio.duration, 55)
+    audio = audio.subclip(0, duration)
+
+    bg = VideoFileClip("background_clip.mp4").resize(height=1920).crop(width=1080)
+    bg = bg.loop(duration=duration) if bg.duration < duration else bg.subclip(0, duration)
+    bg = bg.fx(colorx, 0.6)
+
+    anchor = ImageClip("my_photo.png").set_duration(duration).set_position(("center", "bottom")).resize(height=500)
+    text_clip = TextClip("FUTURE INTELLIGENCE", fontsize=50, color='white', font=font_path, stroke_color='black', stroke_width=2).set_duration(duration).set_position(("center", 0.1))
+
+    final_video = CompositeVideoClip([bg, text_clip, anchor]).set_audio(audio)
+    output_file = f"shorts_{lang_name}.mp4"
+    final_video.write_videofile(output_file, codec="libx264", audio_codec="aac", fps=30, threads=4, preset="medium")
+    os.remove(audio_file)
+    return output_file
+
+# --- 7. AUTO-THUMBNAIL GENERATOR ---
+def generate_thumbnail(lang_name, top_headline, font_path):
+    print(f"🖼️ Generating {lang_name} Thumbnail...")
+    img = Image.new('RGB', (1280, 720), color=(10, 10, 10))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([0, 500, 1280, 720], fill=(180, 0, 0))
+    
     try:
-        import imageio_ffmpeg
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    except ImportError:
-        ffmpeg_exe = "ffmpeg"
+        anchor = Image.open("my_photo.png").resize((400, 400))
+        img.paste(anchor, (850, 50))
+    except: pass
+        
+    font_title = ImageFont.truetype(font_path, 60)
+    font_headline = ImageFont.truetype(font_path, 45)
+    
+    draw.text((20, 20), "BREAKING NEWS", fill="red", font=font_title)
+    draw.text((20, 540), top_headline[:40] + "...", fill="white", font=font_headline)
+    
+    output_file = f"thumbnail_{lang_name}.jpg"
+    img.save(output_file, quality=95)
+    return output_file
 
-    merge_success = False
-    if os.path.exists(INTRO_MUSIC) and os.path.getsize(INTRO_MUSIC) > 0:
-        cmd_with_music = [
-            ffmpeg_exe, "-y", "-i", "silent_video.mp4", "-i", voiceover_path, "-i", INTRO_MUSIC,
-            "-filter_complex", "[1:a]volume=1.0[a1];[2:a]volume=0.1[a2];[a1][a2]amix=inputs=2:duration=first[aout]",
-            "-map", "0:v", "-map", "[aout]", "-c:v", "copy", "-c:a", "aac", "-shortest", output_path
-        ]
-        subprocess.run(cmd_with_music)
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0: merge_success = True
-        else: print("⚠️ Music file is corrupted! Falling back to voice only...")
-
-    if not merge_success:
-        cmd_voice_only = [ffmpeg_exe, "-y", "-i", "silent_video.mp4", "-i", voiceover_path, "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-shortest", output_path]
-        subprocess.run(cmd_voice_only)
-
-    for f in ["voice.mp3", "silent_video.mp4", "ticker.png", "anchor_transparent.mp4"] + [f"overlay_{i}.png" for i in range(len(stories))] + [f"bg_{i}.png" for i in range(len(stories))]:
-        if os.path.exists(f): os.remove(f)
-
-# ----------------------------------------------------------------------
-# 7. UPLOAD TO YOUTUBE
-# ----------------------------------------------------------------------
-def upload_to_youtube(video_path, thumb_path, title, description, tags):
-    print("📤 Uploading to YouTube...")
-    token_json = os.environ.get("YOUTUBE_TOKEN")
-    if not token_json:
-        if os.path.exists("token.json"):
-            with open("token.json", "r") as f: token_json = f.read()
-        else: raise Exception("YOUTUBE_TOKEN env var or token.json missing")
-
-    token_data = json.loads(token_json)
-    creds = Credentials.from_authorized_user_info(token_data)
-    youtube = build("youtube", "v3", credentials=creds)
-
-    body = {
-        "snippet": {"title": title[:100], "description": description, "tags": tags, "categoryId": "28"},
-        "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False}
-    }
-    request = youtube.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(video_path, chunksize=-1, resumable=True))
-
-    response = None
-    while response is None:
-        status, response = request.next_chunk()
-        if status: print(f"   Upload progress: {int(status.progress() * 100)}%")
-
-    video_id = response['id']
-    print(f"✅ Uploaded! Video ID: {video_id}")
-    print(f"🔗 https://youtube.com/watch?v={video_id}")
-
-    if os.path.exists(thumb_path):
-        print("🖼️ Uploading custom thumbnail...")
-        try:
-            youtube.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(thumb_path)).execute()
-            print("✅ Thumbnail uploaded successfully!")
-        except Exception as e:
-            print(f"⚠️ Thumbnail upload failed: {e}")
-    return video_id
-
-# ----------------------------------------------------------------------
-# MAIN
-# ----------------------------------------------------------------------
+# --- MAIN EXECUTION ---
 if __name__ == "__main__":
-    stories = fetch_ai_news()
+    has_music = fetch_background_music()
+    fetch_background_video()
     
-    for i, story in enumerate(stories):
-        script = f"News number {i+1}. {story['title']}. {story['summary']} "
-        asyncio.run(generate_story_audio(script, f"voice_{i}.mp3"))
-    build_final_audio(len(stories))
+    fresh_news = get_fresh_news()
+    if not fresh_news:
+        print("❌ No fresh news found in the last 24 hours. Exiting.")
+        exit()
 
-    thumb_bg_raw = "thumb_bg_raw.png"
-    thumb_bg_vert = "bg_0.png" 
-    if not os.path.exists(thumb_bg_vert):
-        if generate_ai_image(stories[0]["title"], thumb_bg_raw):
-            format_image_vertical(thumb_bg_raw, thumb_bg_vert)
-            if os.path.exists(thumb_bg_raw): os.remove(thumb_bg_raw)
+    for lang_name, lang_data in LANGUAGES.items():
+        print(f"\n--- Processing {lang_name} Channel ---")
+        font_path = get_system_font(lang_data["font"])
+        raw_output = generate_content(fresh_news, lang_name, lang_data["gemini_lang"])
+        
+        try:
+            parts = raw_output.split("[LONG_SCRIPT]")[1].split("[SHORT_SCRIPT]")
+            long_script = parts[0].strip()
+            parts = parts[1].split("[METADATA]")
+            short_script = parts[0].strip()
+            parts = parts[1].split("[TICKER_TEXT]")
+            metadata = parts[0].strip()
+            ticker_text = parts[1].strip()
+        except Exception as e:
+            print(f"❌ Error parsing Gemini output for {lang_name}: {e}")
+            continue
 
-    thumb_file = "thumbnail.jpg"
-    create_thumbnail(stories, thumb_bg_vert, thumb_file)
-
-    video_file = "final_video.mp4"
-    build_video(stories, "voice.mp3", video_file)
-
-    date_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    title = f"Top {len(stories)} AI News Stories - {date_str}"
-    description = "In today's AI news:\n\n"
-    for i, story in enumerate(stories): description += f"{i+1}. {story['title']}\n"
-    description += f"\n🔔 Subscribe to {CHANNEL_NAME} for daily AI news updates.\n#AI #ArtificialIntelligence #MachineLearning #TechNews"
-
-    tags = ["AI", "Artificial Intelligence", "AI News", "Machine Learning", "OpenAI", "Tech News"]
-
-    upload_to_youtube(video_file, thumb_file, title, description, tags)
-
-    for f in [video_file, thumb_file]:
-        if os.path.exists(f): os.remove(f)
-    print("🎉 Done! Video live on YouTube.")
+        with open(f"youtube_metadata_{lang_name}.txt", "w", encoding='
