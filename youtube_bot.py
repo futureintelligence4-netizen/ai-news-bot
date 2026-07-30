@@ -124,17 +124,22 @@ def get_fresh_news():
     with open("news_history.json", "w") as f: json.dump(history, f, indent=4)
     return fresh_news
 
-# --- 2. GEMINI RAW API CALL (Fixed to 1.5-flash & 8192 tokens) ---
+# --- 2. GEMINI RAW API CALL (Header Auth + 2.5 Flash Model) ---
 def call_gemini(prompt):
-    api_key = os.environ.get("GEMINI_API_KEY")
-    # Using gemini-1.5-flash as requested
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    api_key = os.environ.get("GEMINI_API_KEY").strip()
+    
+    # Using gemini-2.5-flash which we confirmed is available on your account
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key  # Header auth is required for AQ... keys
+    }
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.8, "maxOutputTokens": 8192}  # Increased token limit
+        "generationConfig": {"temperature": 0.8, "maxOutputTokens": 8192}
     }
     try:
-        response = requests.post(url, json=payload, timeout=90)
+        response = requests.post(url, headers=headers, json=payload, timeout=90)
         if response.status_code != 200:
             print(f"🔍 Google API Raw Response: {response.text}")
         response.raise_for_status()
