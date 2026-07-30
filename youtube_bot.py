@@ -124,15 +124,15 @@ def get_fresh_news():
     with open("news_history.json", "w") as f: json.dump(history, f, indent=4)
     return fresh_news
 
-# --- 2. GEMINI RAW API CALL (Header Auth + 2.5 Flash Model) ---
+# --- 2. GEMINI RAW API CALL (Using gemini-flash-latest) ---
 def call_gemini(prompt):
     api_key = os.environ.get("GEMINI_API_KEY").strip()
     
-    # Using gemini-2.5-flash which we confirmed is available on your account
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent"
+    # Using gemini-flash-latest which is confirmed available on your account
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
     headers = {
         "Content-Type": "application/json",
-        "x-goog-api-key": api_key  # Header auth is required for AQ... keys
+        "x-goog-api-key": api_key
     }
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
