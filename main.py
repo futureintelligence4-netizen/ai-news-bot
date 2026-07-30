@@ -10,7 +10,7 @@ from datetime import datetime
 
 import feedparser
 import edge_tts
-from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip, vfx
+from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, ColorClip
 from PIL import Image, ImageDraw, ImageFont
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -271,7 +271,44 @@ def create_thumbnail(stories, bg_image_path, output_path="thumbnail.jpg"):
     img.save(output_path, "JPEG", quality=90)
 
 # ----------------------------------------------------------------------
-# 5. BUILD FINAL VIDEO (FIXED TICKER + FIXED ANCHOR)
+# 5. BULLETPROOF GREEN SCREEN ANCHOR
+# ----------------------------------------------------------------------
+def prepare_anchor_video():
+    """Uses raw FFmpeg to remove green screen. Much more reliable than MoviePy."""
+    if not os.path.exists(ANCHOR_VIDEO):
+        print("⚠️ anchor.mp4 not found.")
+        return None
+
+    print("🟢 Removing green screen from anchor using raw FFmpeg...")
+    try:
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    except ImportError:
+        ffmpeg_exe = "ffmpeg"
+
+    output_path = "anchor_transparent.mp4"
+    
+    # FFmpeg chroma key command. We scale it to 400px wide, loop it, and make green transparent.
+    cmd = [
+        ffmpeg_exe, "-y",
+        "-i", ANCHOR_VIDEO,
+        "-t", "120",  # Limit to 120 seconds
+        "-vf", "scale=400:-1,format=yuva420p,colorkey=0x00FF00:0.3:0.2",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        output_path
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True)
+        print("✅ Anchor green screen removed successfully!")
+        return output_path
+    except subprocess.CalledProcessError as e:
+        print(f"⚠️ FFmpeg failed to process anchor: {e}")
+        return None
+
+# ----------------------------------------------------------------------
+# 6. BUILD FINAL VIDEO
 # ----------------------------------------------------------------------
 def build_video(stories, voiceover_path, output_path="final_video.mp4"):
     print("🎬 Building silent video with MoviePy...")
@@ -307,30 +344,27 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
 
     final_clips = bg_clips + overlay_clips
 
-    # 1. Fixed Scrolling Ticker Tape (Slowed down to 100 pixels per second)
+    # 1. Scrolling Ticker Tape
     headlines = [s["title"] for s in stories]
     create_ticker_image(headlines, "ticker.png")
     ticker_img = ImageClip("ticker.png").set_duration(120)
-    # Calculate speed so it takes exactly 20 seconds to scroll one full screen
     scroll_speed = (ticker_img.w + 1080) / 20.0 
     ticker_clip = ticker_img.set_position(lambda t: (1080 - (t * scroll_speed) % (ticker_img.w + 1080), 1820)).set_duration(120)
     final_clips.append(ticker_clip)
 
-    # 2. Fixed Green Screen Anchor (Fixed chroma key threshold)
-    if os.path.exists(ANCHOR_VIDEO):
-        print(f"👤 Loading green screen anchor: {ANCHOR_VIDEO}")
+    # 2. Add Pre-processed Green Screen Anchor
+    transparent_anchor_path = prepare_anchor_video()
+    if transparent_anchor_path:
+        print("👤 Loading transparent anchor into video...")
         try:
-            anchor = VideoFileClip(ANCHOR_VIDEO).without_audio()
-            anchor = anchor.loop(duration=120).set_duration(120)
-            anchor = anchor.resize(width=400)
-            # thr=50 means it only removes pure green, keeping the anchor perfectly visible
-            anchor_clip = anchor.fx(vfx.mask_color, color=[0, 255, 0], thr=50, s=5).set_position((640, 150)).set_duration(120)
+            anchor = VideoFileClip(transparent_anchor_path).without_audio()
+            if anchor.duration < 120:
+                anchor = anchor.loop(duration=120).set_duration(120)
+            anchor_clip = anchor.set_position((640, 150)).set_duration(120)
             final_clips.append(anchor_clip)
-            print("✅ Anchor loaded and green screen removed!")
+            print("✅ Anchor added to scene!")
         except Exception as e:
-            print(f"⚠️ Anchor video failed to load: {e}")
-    else:
-        print("⚠️ anchor.mp4 not found in repository.")
+            print(f"⚠️ Failed to load transparent anchor into MoviePy: {e}")
 
     final = CompositeVideoClip(final_clips, size=(1080, 1920)).set_duration(120)
 
@@ -366,11 +400,11 @@ def build_video(stories, voiceover_path, output_path="final_video.mp4"):
         cmd_voice_only = [ffmpeg_exe, "-y", "-i", "silent_video.mp4", "-i", voiceover_path, "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-shortest", output_path]
         subprocess.run(cmd_voice_only)
 
-    for f in ["voice.mp3", "silent_video.mp4", "ticker.png"] + [f"overlay_{i}.png" for i in range(len(stories))] + [f"bg_{i}.png" for i in range(len(stories))]:
+    for f in ["voice.mp3", "silent_video.mp4", "ticker.png", "anchor_transparent.mp4"] + [f"overlay_{i}.png" for i in range(len(stories))] + [f"bg_{i}.png" for i in range(len(stories))]:
         if os.path.exists(f): os.remove(f)
 
 # ----------------------------------------------------------------------
-# 6. UPLOAD TO YOUTUBE
+# 7. UPLOAD TO YOUTUBE
 # ----------------------------------------------------------------------
 def upload_to_youtube(video_path, thumb_path, title, description, tags):
     print("📤 Uploading to YouTube...")
