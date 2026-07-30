@@ -129,7 +129,7 @@ def call_gemini(prompt):
     api_key = os.environ.get("GEMINI_API_KEY").strip()
     
     # Using gemini-2.5-flash which we confirmed is available on your account
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent"
     headers = {
         "Content-Type": "application/json",
         "x-goog-api-key": api_key  # Header auth is required for AQ... keys
