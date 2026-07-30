@@ -2,7 +2,7 @@ name: Daily Multi-Language News Generator
 
 on:
   schedule:
-    - cron: '0 8,20 * * *'  # 8:00 AM and 8:00 PM UTC
+    - cron: '0 8,20 * * *'  # 8 AM and 8 PM UTC
   workflow_dispatch:
 
 jobs:
@@ -19,11 +19,11 @@ jobs:
         with:
           python-version: '3.10'
           
-      - name: Install dependencies & OS-Level Fonts
+      - name: Install dependencies, Fonts & ImageMagick
         run: |
           pip install google-generativeai edge-tts moviepy==1.0.3 requests python-dotenv feedparser pytz pillow imageio-ffmpeg
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fontconfig fonts-noto fonts-noto-core fonts-noto-extra
+          sudo apt-get install -y ffmpeg imagemagick fontconfig fonts-noto fonts-noto-core fonts-noto-extra
           
       - name: Run News Bot
         env:
