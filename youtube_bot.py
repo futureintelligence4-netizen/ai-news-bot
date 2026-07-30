@@ -124,17 +124,17 @@ def get_fresh_news():
     with open("news_history.json", "w") as f: json.dump(history, f, indent=4)
     return fresh_news
 
-# --- 2. GEMINI RAW API CALL ---
+# --- 2. GEMINI RAW API CALL (Universal 1.0 Pro Model) ---
 def call_gemini(prompt):
     api_key = os.environ.get("GEMINI_API_KEY")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    # Using gemini-1.0-pro-latest which is universally available on all Google accounts
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro-latest:generateContent?key={api_key}"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.8, "maxOutputTokens": 8192}
+        "generationConfig": {"temperature": 0.8, "maxOutputTokens": 2048}
     }
     try:
         response = requests.post(url, json=payload, timeout=90)
-        # DIAGNOSTIC LINE: This will print Google's exact error message if it fails
         if response.status_code != 200:
             print(f"🔍 Google API Raw Response: {response.text}")
         response.raise_for_status()
@@ -150,7 +150,7 @@ def generate_content(headlines, language_name, gemini_lang):
     
     prompt = f"""
     You are a top-tier prime-time news anchor for 'Future Intelligence News' in India.
-    Write a highly detailed 1,500+ word broadcast script in **{gemini_lang}** based on these latest headlines: {headlines}.
+    Write a highly detailed 1,000+ word broadcast script in **{gemini_lang}** based on these latest headlines: {headlines}.
     Do NOT translate literally. Write natively as a local news channel would speak.
     
     FOLLOW THIS EXACT BROADCAST STRUCTURE:
