@@ -1,4 +1,10 @@
 import os
+import shutil
+# --- MOVIEPY IMAGEMAGICK FIX ---
+import moviepy.config as mp_config
+if shutil.which("convert"):
+    mp_config.change_settings({"IMAGEMAGICK_BINARY": shutil.which("convert")})
+
 # --- PILLOW COMPATIBILITY PATCH (Fixes MoviePy ANTIALIAS error) ---
 import PIL.Image
 if not hasattr(PIL.Image, 'ANTIALIAS'): PIL.Image.ANTIALIAS = PIL.Image.Resampling.LANCZOS
@@ -45,7 +51,6 @@ def fetch_background_music():
     url = "https://www.soundjay.com/buttons/sounds/button-2.mp3"
     try:
         r = requests.get(url, timeout=10)
-        # FIX: Verify the file is actually an audio file and not an HTML error page
         if r.status_code == 200 and 'audio' in r.headers.get('Content-Type', ''):
             with open("news_theme.mp3", "wb") as f: f.write(r.content)
             return True
@@ -202,9 +207,8 @@ async def _generate_voice_async(text, tts_voice, srt_path, audio_path):
                 try:
                     submaker.create_sub((chunk["offset"], chunk["duration"]), chunk["text"])
                 except Exception:
-                    pass  # Ignore edge-tts internal submaker changes
+                    pass
     
-    # Safely generate subtitles, fallback to empty file if library fails
     try:
         subs = submaker.generate_subs()
         with open(srt_path, "w", encoding='utf-8') as f:
@@ -372,7 +376,6 @@ if __name__ == "__main__":
             continue
             
         try:
-            # FIX: Safely parse output to prevent crashing if Gemini misses a tag
             long_script = ""
             short_script = ""
             metadata = ""
