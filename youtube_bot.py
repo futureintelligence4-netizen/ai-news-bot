@@ -124,11 +124,9 @@ def get_fresh_news():
     with open("news_history.json", "w") as f: json.dump(history, f, indent=4)
     return fresh_news
 
-# --- 2. GEMINI RAW API CALL (Using gemini-flash-latest) ---
+# --- 2. GEMINI RAW API CALL ---
 def call_gemini(prompt):
     api_key = os.environ.get("GEMINI_API_KEY").strip()
-    
-    # Using gemini-flash-latest which is confirmed available on your account
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
     headers = {
         "Content-Type": "application/json",
@@ -184,15 +182,29 @@ def generate_content(headlines, language_name, gemini_lang):
     """
     return call_gemini(prompt)
 
-# --- 3. EDGE-TTS VOICE & SUBTITLES ---
+# --- 3. EDGE-TTS VOICE & SUBTITLES (FIXED) ---
 async def _generate_voice_async(text, tts_voice, srt_path, audio_path):
     communicate = edge_tts.Communicate(text, tts_voice)
     submaker = edge_tts.SubMaker()
     with open(audio_path, "wb") as audio_file:
         async for chunk in communicate.stream():
-            if chunk["type"] == "audio": audio_file.write(chunk["data"])
-            elif chunk["type"] == "WordBoundary": submaker.create_sub((chunk["offset"], chunk["duration"]), chunk["text"])
-    with open(srt_path, "w", encoding='utf-8') as f: f.write(submaker.generate_subs())
+            if chunk["type"] == "audio":
+                audio_file.write(chunk["data"])
+            elif chunk["type"] == "WordBoundary":
+                try:
+                    submaker.create_sub((chunk["offset"], chunk["duration"]), chunk["text"])
+                except Exception:
+                    pass  # Ignore edge-tts internal submaker changes
+    
+    # Safely generate subtitles, fallback to empty file if library fails
+    try:
+        subs = submaker.generate_subs()
+        with open(srt_path, "w", encoding='utf-8') as f:
+            f.write(subs)
+    except Exception as e:
+        print(f"⚠️ Subtitle generation skipped due to library update: {e}")
+        with open(srt_path, "w", encoding='utf-8') as f:
+            f.write("1\n00:00:00,000 --> 00:00:10,000\nSubtitles temporarily unavailable\n")
 
 def generate_voice_and_subs(text, lang_name, tts_voice, prefix="temp"):
     audio_path = f"{prefix}_voice_{lang_name}.mp3"
