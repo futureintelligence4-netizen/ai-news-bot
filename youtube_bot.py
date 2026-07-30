@@ -38,7 +38,7 @@ def get_system_font(font_name):
 
 def fetch_background_music():
     print("🎵 Fetching background music...")
-    url = "https://www.soundjay.com/buttons/sounds/button-2.mp3" # Placeholder for CC0 music
+    url = "https://www.soundjay.com/buttons/sounds/button-2.mp3"
     try:
         r = requests.get(url, timeout=10)
         with open("news_theme.mp3", "wb") as f: f.write(r.content)
@@ -64,7 +64,6 @@ def is_safe(text):
     return True
 
 def prepare_anchor_video():
-    """Uses raw FFmpeg to remove green screen and output a transparent WebM."""
     if not os.path.exists("anchor.mp4"):
         print("⚠️ anchor.mp4 not found. Falling back to Live Broadcast Photo Zoom.")
         return None
@@ -77,7 +76,6 @@ def prepare_anchor_video():
         ffmpeg_exe = "ffmpeg"
 
     output_path = "anchor_transparent.webm"
-    
     cmd = [
         ffmpeg_exe, "-y", "-i", "anchor.mp4",
         "-t", "15",
@@ -88,7 +86,6 @@ def prepare_anchor_video():
         "-auto-alt-ref", "0",
         output_path
     ]
-    
     try:
         subprocess.run(cmd, check=True)
         print("✅ Anchor green screen removed and ready!")
@@ -97,7 +94,7 @@ def prepare_anchor_video():
         print(f"⚠️ FFmpeg failed to process anchor: {e}")
         return None
 
-# --- 1. NEWS FETCHER (48h Memory & Safety Filter) ---
+# --- 1. NEWS FETCHER ---
 def get_fresh_news():
     print("📰 Fetching latest Future Intelligence news...")
     url = "https://news.google.com/rss/search?q=artificial+intelligence+stocks+OR+crypto+news+OR+tech+business+latest+news&hl=en-US&gl=US&ceid=US:en"
@@ -128,26 +125,25 @@ def get_fresh_news():
     return fresh_news
 
 # --- 2. GEMINI RAW API CALL ---
-
 def call_gemini(prompt):
     api_key = os.environ.get("GEMINI_API_KEY")
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": api_key
-    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.8, "maxOutputTokens": 8192}
     }
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=90)
+        response = requests.post(url, json=payload, timeout=90)
+        # DIAGNOSTIC LINE: This will print Google's exact error message if it fails
+        if response.status_code != 200:
+            print(f"🔍 Google API Raw Response: {response.text}")
         response.raise_for_status()
         data = response.json()
         return data['candidates'][0]['content']['parts'][0]['text']
     except Exception as e:
         print(f"❌ Raw API call failed: {e}")
         return ""
+
 def generate_content(headlines, language_name, gemini_lang):
     print(f"📝 Generating scripts & metadata for {language_name} via raw API...")
     time_of_day = "morning" if datetime.datetime.now().hour < 12 else "evening"
@@ -234,7 +230,6 @@ def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path
         mixed_audio = CompositeAudioClip([audio, music])
     else: mixed_audio = audio
 
-    # --- ANCHOR SETUP (Video or Live Broadcast Photo Zoom Fallback) ---
     if transparent_anchor_path:
         print("👤 Loading looping video anchor...")
         anchor_raw = VideoFileClip(transparent_anchor_path).without_audio()
@@ -330,7 +325,7 @@ def generate_thumbnail(lang_name, top_headline, font_path):
 if __name__ == "__main__":
     has_music = fetch_background_music()
     fetch_background_video()
-    transparent_anchor_path = prepare_anchor_video() # Will return None if anchor.mp4 is missing, triggering the photo zoom
+    transparent_anchor_path = prepare_anchor_video()
     
     fresh_news = get_fresh_news()
     if not fresh_news:
