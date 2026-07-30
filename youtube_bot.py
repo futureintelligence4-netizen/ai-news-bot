@@ -128,22 +128,26 @@ def get_fresh_news():
     return fresh_news
 
 # --- 2. GEMINI RAW API CALL ---
+
 def call_gemini(prompt):
     api_key = os.environ.get("GEMINI_API_KEY")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key.strip()}"
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key
+    }
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.8, "maxOutputTokens": 8192}
     }
     try:
-        response = requests.post(url, json=payload, timeout=90)
+        response = requests.post(url, headers=headers, json=payload, timeout=90)
         response.raise_for_status()
         data = response.json()
         return data['candidates'][0]['content']['parts'][0]['text']
     except Exception as e:
         print(f"❌ Raw API call failed: {e}")
         return ""
-
 def generate_content(headlines, language_name, gemini_lang):
     print(f"📝 Generating scripts & metadata for {language_name} via raw API...")
     time_of_day = "morning" if datetime.datetime.now().hour < 12 else "evening"
