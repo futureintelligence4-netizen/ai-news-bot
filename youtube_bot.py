@@ -45,9 +45,13 @@ def fetch_background_music():
     url = "https://www.soundjay.com/buttons/sounds/button-2.mp3"
     try:
         r = requests.get(url, timeout=10)
-        with open("news_theme.mp3", "wb") as f: f.write(r.content)
-        return True
-    except: return False
+        # FIX: Verify the file is actually an audio file and not an HTML error page
+        if r.status_code == 200 and 'audio' in r.headers.get('Content-Type', ''):
+            with open("news_theme.mp3", "wb") as f: f.write(r.content)
+            return True
+    except: pass
+    print("⚠️ Background music fetch failed. Proceeding without music.")
+    return False
 
 def fetch_background_video():
     print("🎥 Fetching dynamic background video...")
@@ -247,9 +251,14 @@ def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path
     bg = bg.fx(colorx, 0.55)
 
     if has_music and os.path.exists("news_theme.mp3"):
-        music = AudioFileClip("news_theme.mp3").fx(volumex, 0.15).audio_loop(duration=duration)
-        mixed_audio = CompositeAudioClip([audio, music])
-    else: mixed_audio = audio
+        try:
+            music = AudioFileClip("news_theme.mp3").fx(volumex, 0.15).audio_loop(duration=duration)
+            mixed_audio = CompositeAudioClip([audio, music])
+        except Exception as e:
+            print(f"⚠️ Music file corrupted, proceeding without music. Error: {e}")
+            mixed_audio = audio
+    else: 
+        mixed_audio = audio
 
     if transparent_anchor_path:
         print("👤 Loading looping video anchor...")
@@ -363,13 +372,21 @@ if __name__ == "__main__":
             continue
             
         try:
-            parts = raw_output.split("[LONG_SCRIPT]")[1].split("[SHORT_SCRIPT]")
-            long_script = parts[0].strip()
-            parts = parts[1].split("[METADATA]")
-            short_script = parts[0].strip()
-            parts = parts[1].split("[TICKER_TEXT]")
-            metadata = parts[0].strip()
-            ticker_text = parts[1].strip()
+            # FIX: Safely parse output to prevent crashing if Gemini misses a tag
+            long_script = ""
+            short_script = ""
+            metadata = ""
+            ticker_text = "Breaking News"
+            
+            if "[LONG_SCRIPT]" in raw_output:
+                long_script = raw_output.split("[LONG_SCRIPT]")[1].split("[SHORT_SCRIPT]")[0].strip()
+            if "[SHORT_SCRIPT]" in raw_output:
+                short_script = raw_output.split("[SHORT_SCRIPT]")[1].split("[METADATA]")[0].strip()
+            if "[METADATA]" in raw_output:
+                metadata = raw_output.split("[METADATA]")[1].split("[TICKER_TEXT]")[0].strip()
+            if "[TICKER_TEXT]" in raw_output:
+                ticker_text = raw_output.split("[TICKER_TEXT]")[1].strip().split("\n")[0]
+                
         except Exception as e:
             print(f"❌ Error parsing Gemini output for {lang_name}: {e}")
             continue
