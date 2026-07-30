@@ -279,13 +279,13 @@ def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path
 
     logo = TextClip("FUTURE INTELLIGENCE NEWS", fontsize=36, color='white', font=font_path, stroke_color='black', stroke_width=2).set_duration(duration).set_position((20, 20))
     
-    # FIX: Removed animated opacity to prevent MoviePy crash. Solid red dot and text.
     live_dot = ColorClip(size=(20, 20), color=(220, 0, 0)).set_duration(duration).set_position((20, 70))
     live_text = TextClip("LIVE", fontsize=24, color='white', font=font_path, stroke_color='red', stroke_width=1).set_duration(duration).set_position((50, 68))
     
+    # FIX: Static clock to prevent MoviePy frame-by-frame ImageMagick crashes
     ist_time = datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)
-    clock = TextClip("00:00:00 IST", fontsize=22, color='white', font=font_path).set_duration(duration).set_position((20, 100))
-    clock = clock.set_text(lambda t: (ist_time + datetime.timedelta(seconds=t)).strftime("%H:%M:%S IST"))
+    clock_str = ist_time.strftime("%H:%M:%S IST")
+    clock = TextClip(clock_str, fontsize=22, color='white', font=font_path).set_duration(duration).set_position((20, 100))
 
     ticker_bg = ColorClip(size=(1920, 80), color=(180, 0, 0)).set_duration(duration).set_position(("center", "bottom"))
     ticker_label = TextClip("BREAKING", fontsize=36, color='black', font=font_path).set_duration(duration).set_position((10, 1010))
