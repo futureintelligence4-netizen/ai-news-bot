@@ -281,4 +281,11 @@ if __name__ == "__main__":
             print(f"❌ Error parsing Gemini output for {lang_name}: {e}")
             continue
 
-        with open(f"youtube_metadata_{lang_name}.txt", "w", encoding='
+        with open(f"youtube_metadata_{lang_name}.txt", "w", encoding='utf-8') as f: f.write(metadata)
+            
+        audio_file, srt_file = generate_and_validate_voice(long_script, lang_name, lang_data["gemini_lang"], lang_data["tts"], fresh_news)
+        assemble_long_video(audio_file, ticker_text, lang_name, fresh_news, font_path, has_music)
+        assemble_shorts(short_script, lang_name, lang_data["tts"], font_path)
+        generate_thumbnail(lang_name, fresh_news[0], font_path)
+        
+    print("\n✅ ALL ASSETS GENERATED SUCCESSFULLY! READY FOR MANUAL UPLOAD.")
