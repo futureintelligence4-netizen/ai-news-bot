@@ -8,7 +8,6 @@ import math
 import feedparser
 import pytz
 import edge_tts
-import google.generativeai as genai
 from moviepy.editor import (
     VideoFileClip, ImageClip, AudioFileClip, CompositeVideoClip,
     TextClip, ColorClip, CompositeAudioClip
@@ -18,8 +17,6 @@ from moviepy.audio.fx.all import volumex
 from PIL import Image, ImageDraw, ImageFont
 
 # --- CONFIGURATION ---
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-
 LANGUAGES = {
     "English": {"tts": "en-IN-NeerjaNeural", "gemini_lang": "Indian English", "font": "Noto Sans Bold"},
     "Hindi": {"tts": "hi-IN-SwaraNeural", "gemini_lang": "Hindi", "font": "Noto Sans Devanagari Bold"},
@@ -81,10 +78,9 @@ def prepare_anchor_video():
 
     output_path = "anchor_transparent.webm"
     
-    # FFmpeg command: scale to 350px height, chroma key green, output as VP8 WebM with alpha
     cmd = [
         ffmpeg_exe, "-y", "-i", "anchor.mp4",
-        "-t", "15", # Keep it 15 seconds
+        "-t", "15",
         "-vf", "scale=-1:350,colorkey=0x00FF00:0.3:0.2,format=yuva420p",
         "-c:v", "libvpx-vp9",
         "-pix_fmt", "yuva420p",
@@ -131,10 +127,25 @@ def get_fresh_news():
     with open("news_history.json", "w") as f: json.dump(history, f, indent=4)
     return fresh_news
 
-# --- 2. GEMINI SCRIPT GENERATOR ---
+# --- 2. GEMINI RAW API CALL ---
+def call_gemini(prompt):
+    api_key = os.environ.get("GEMINI_API_KEY")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.8, "maxOutputTokens": 8192}
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=90)
+        response.raise_for_status()
+        data = response.json()
+        return data['candidates'][0]['content']['parts'][0]['text']
+    except Exception as e:
+        print(f"❌ Raw API call failed: {e}")
+        return ""
+
 def generate_content(headlines, language_name, gemini_lang):
-    print(f"📝 Generating scripts & metadata for {language_name}...")
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    print(f"📝 Generating scripts & metadata for {language_name} via raw API...")
     time_of_day = "morning" if datetime.datetime.now().hour < 12 else "evening"
     
     prompt = f"""
@@ -166,7 +177,7 @@ def generate_content(headlines, language_name, gemini_lang):
     [TICKER_TEXT]
     <ticker text here>
     """
-    return model.generate_content(prompt).text
+    return call_gemini(prompt)
 
 # --- 3. EDGE-TTS VOICE & SUBTITLES ---
 async def _generate_voice_async(text, tts_voice, srt_path, audio_path):
@@ -196,8 +207,10 @@ def generate_and_validate_voice(script, lang_name, gemini_lang, tts_voice, headl
             return audio_file, srt_file
         attempt += 1
         print(f"⚠️ Failed validation. Requesting more content (Attempt {attempt})...")
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        extra = model.generate_content(f"The following {gemini_lang} script is too short. Add 500 words of deep analysis about {headlines} before the closing. Return ONLY the new text.\n\nScript: {current_script}").text
+        
+        ext_prompt = f"The following {gemini_lang} script is too short. Add 500 words of deep analysis about {headlines} before the closing. Return ONLY the new text.\n\nScript: {current_script}"
+        extra = call_gemini(ext_prompt)
+        
         current_script = current_script.replace("[CLOSING]", f"{extra}\n\n[CLOSING]")
         os.remove(audio_file); os.remove(srt_file)
     return generate_voice_and_subs(current_script, lang_name, tts_voice, "final")
@@ -225,11 +238,8 @@ def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path
     else:
         print("👤 Loading Live Broadcast Zoom photo anchor...")
         raw_anchor = ImageClip("my_photo.png").set_duration(duration).resize(height=350)
-        # Subtle zoom: starts at 100% and slowly zooms to 110% over 8 minutes
         anchor_zoom = raw_anchor.resize(lambda t: 1 + 0.10 * (t / duration))
-        # Subtle pan: moves slightly up and down to mimic breathing/handheld camera
         def anchor_pos(t):
-            # Locked to right, subtle up/down sine wave for y
             y = 0 + 10 * math.sin(t / 2)
             return ("right", y)
         anchor = anchor_zoom.set_position(anchor_pos)
@@ -328,6 +338,10 @@ if __name__ == "__main__":
         font_path = get_system_font(lang_data["font"])
         raw_output = generate_content(fresh_news, lang_name, lang_data["gemini_lang"])
         
+        if not raw_output:
+            print(f"❌ Skipping {lang_name} due to API error.")
+            continue
+            
         try:
             parts = raw_output.split("[LONG_SCRIPT]")[1].split("[SHORT_SCRIPT]")
             long_script = parts[0].strip()
