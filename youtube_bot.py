@@ -279,9 +279,9 @@ def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path
 
     logo = TextClip("FUTURE INTELLIGENCE NEWS", fontsize=36, color='white', font=font_path, stroke_color='black', stroke_width=2).set_duration(duration).set_position((20, 20))
     
-    live_pulse = lambda t: 0.6 + 0.4 * abs((t % 2) - 1)
+    # FIX: Removed animated opacity to prevent MoviePy crash. Solid red dot and text.
     live_dot = ColorClip(size=(20, 20), color=(220, 0, 0)).set_duration(duration).set_position((20, 70))
-    live_text = TextClip("LIVE", fontsize=24, color='white', font=font_path, stroke_color='red', stroke_width=1).set_duration(duration).set_position((50, 68)).set_opacity(live_pulse)
+    live_text = TextClip("LIVE", fontsize=24, color='white', font=font_path, stroke_color='red', stroke_width=1).set_duration(duration).set_position((50, 68))
     
     ist_time = datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)
     clock = TextClip("00:00:00 IST", fontsize=22, color='white', font=font_path).set_duration(duration).set_position((20, 100))
