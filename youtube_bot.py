@@ -4,6 +4,7 @@ import subprocess
 import requests
 import datetime
 import json
+import math
 import feedparser
 import pytz
 import edge_tts
@@ -63,6 +64,41 @@ def is_safe(text):
     for word in BLOCKED_KEYWORDS:
         if word in text.lower(): return False
     return True
+
+def prepare_anchor_video():
+    """Uses raw FFmpeg to remove green screen and output a transparent WebM."""
+    if not os.path.exists("anchor.mp4"):
+        print("⚠️ anchor.mp4 not found. Falling back to Live Broadcast Photo Zoom.")
+        return None
+
+    print("🟢 Removing green screen from anchor.mp4...")
+    try:
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    except ImportError:
+        ffmpeg_exe = "ffmpeg"
+
+    output_path = "anchor_transparent.webm"
+    
+    # FFmpeg command: scale to 350px height, chroma key green, output as VP8 WebM with alpha
+    cmd = [
+        ffmpeg_exe, "-y", "-i", "anchor.mp4",
+        "-t", "15", # Keep it 15 seconds
+        "-vf", "scale=-1:350,colorkey=0x00FF00:0.3:0.2,format=yuva420p",
+        "-c:v", "libvpx-vp9",
+        "-pix_fmt", "yuva420p",
+        "-b:v", "1M",
+        "-auto-alt-ref", "0",
+        output_path
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True)
+        print("✅ Anchor green screen removed and ready!")
+        return output_path
+    except subprocess.CalledProcessError as e:
+        print(f"⚠️ FFmpeg failed to process anchor: {e}")
+        return None
 
 # --- 1. NEWS FETCHER (48h Memory & Safety Filter) ---
 def get_fresh_news():
@@ -166,7 +202,7 @@ def generate_and_validate_voice(script, lang_name, gemini_lang, tts_voice, headl
     return generate_voice_and_subs(current_script, lang_name, tts_voice, "final")
 
 # --- 5. PRO VIDEO ASSEMBLY (LONG FORM) ---
-def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path, has_music):
+def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path, has_music, transparent_anchor_path):
     print(f"🎬 Assembling Long-form {lang_name} Broadcast...")
     audio = AudioFileClip(audio_file)
     duration = audio.duration
@@ -180,7 +216,23 @@ def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path
         mixed_audio = CompositeAudioClip([audio, music])
     else: mixed_audio = audio
 
-    anchor = ImageClip("my_photo.png").set_duration(duration).set_position(("right", "top")).resize(height=350)
+    # --- ANCHOR SETUP (Video or Live Broadcast Photo Zoom Fallback) ---
+    if transparent_anchor_path:
+        print("👤 Loading looping video anchor...")
+        anchor_raw = VideoFileClip(transparent_anchor_path).without_audio()
+        anchor = anchor_raw.loop(duration=duration).set_position(("right", "top"))
+    else:
+        print("👤 Loading Live Broadcast Zoom photo anchor...")
+        raw_anchor = ImageClip("my_photo.png").set_duration(duration).resize(height=350)
+        # Subtle zoom: starts at 100% and slowly zooms to 110% over 8 minutes
+        anchor_zoom = raw_anchor.resize(lambda t: 1 + 0.10 * (t / duration))
+        # Subtle pan: moves slightly up and down to mimic breathing/handheld camera
+        def anchor_pos(t):
+            # Locked to right, subtle up/down sine wave for y
+            y = 0 + 10 * math.sin(t / 2)
+            return ("right", y)
+        anchor = anchor_zoom.set_position(anchor_pos)
+
     logo = TextClip("FUTURE INTELLIGENCE NEWS", fontsize=36, color='white', font=font_path, stroke_color='black', stroke_width=2).set_duration(duration).set_position((20, 20))
     
     live_pulse = lambda t: 0.6 + 0.4 * abs((t % 2) - 1)
@@ -211,7 +263,7 @@ def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path
     return output_file
 
 # --- 6. SHORTS ASSEMBLY ---
-def assemble_shorts(short_script, lang_name, tts_voice, font_path):
+def assemble_shorts(short_script, lang_name, tts_voice, font_path, transparent_anchor_path):
     print(f"📱 Assembling {lang_name} Short...")
     audio_file = f"short_voice_{lang_name}.mp3"
     asyncio.run(_generate_voice_async(short_script, tts_voice, f"short_subs_{lang_name}.srt", audio_file))
@@ -223,7 +275,12 @@ def assemble_shorts(short_script, lang_name, tts_voice, font_path):
     bg = bg.loop(duration=duration) if bg.duration < duration else bg.subclip(0, duration)
     bg = bg.fx(colorx, 0.6)
 
-    anchor = ImageClip("my_photo.png").set_duration(duration).set_position(("center", "bottom")).resize(height=500)
+    if transparent_anchor_path:
+        anchor_raw = VideoFileClip(transparent_anchor_path).without_audio()
+        anchor = anchor_raw.loop(duration=duration).set_position(("center", "bottom")).resize(height=500)
+    else:
+        anchor = ImageClip("my_photo.png").set_duration(duration).set_position(("center", "bottom")).resize(height=500)
+
     text_clip = TextClip("FUTURE INTELLIGENCE", fontsize=50, color='white', font=font_path, stroke_color='black', stroke_width=2).set_duration(duration).set_position(("center", 0.1))
 
     final_video = CompositeVideoClip([bg, text_clip, anchor]).set_audio(audio)
@@ -258,6 +315,7 @@ def generate_thumbnail(lang_name, top_headline, font_path):
 if __name__ == "__main__":
     has_music = fetch_background_music()
     fetch_background_video()
+    transparent_anchor_path = prepare_anchor_video() # Will return None if anchor.mp4 is missing, triggering the photo zoom
     
     fresh_news = get_fresh_news()
     if not fresh_news:
@@ -284,8 +342,8 @@ if __name__ == "__main__":
         with open(f"youtube_metadata_{lang_name}.txt", "w", encoding='utf-8') as f: f.write(metadata)
             
         audio_file, srt_file = generate_and_validate_voice(long_script, lang_name, lang_data["gemini_lang"], lang_data["tts"], fresh_news)
-        assemble_long_video(audio_file, ticker_text, lang_name, fresh_news, font_path, has_music)
-        assemble_shorts(short_script, lang_name, lang_data["tts"], font_path)
+        assemble_long_video(audio_file, ticker_text, lang_name, fresh_news, font_path, has_music, transparent_anchor_path)
+        assemble_shorts(short_script, lang_name, lang_data["tts"], font_path, transparent_anchor_path)
         generate_thumbnail(lang_name, fresh_news[0], font_path)
         
     print("\n✅ ALL ASSETS GENERATED SUCCESSFULLY! READY FOR MANUAL UPLOAD.")
