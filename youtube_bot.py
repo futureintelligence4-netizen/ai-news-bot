@@ -1,4 +1,8 @@
 import os
+# --- PILLOW COMPATIBILITY PATCH (Fixes MoviePy ANTIALIAS error) ---
+import PIL.Image
+if not hasattr(PIL.Image, 'ANTIALIAS'): PIL.Image.ANTIALIAS = PIL.Image.Resampling.LANCZOS
+
 import asyncio
 import subprocess
 import requests
