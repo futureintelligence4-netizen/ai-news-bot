@@ -134,7 +134,7 @@ def get_fresh_news():
 # --- 2. GEMINI SCRIPT GENERATOR ---
 def generate_content(headlines, language_name, gemini_lang):
     print(f"📝 Generating scripts & metadata for {language_name}...")
-    model = genai.GenerativeModel('gemini-1.5-pro-latest')
+    model = genai.GenerativeModel('gemini-1.5-flash')
     time_of_day = "morning" if datetime.datetime.now().hour < 12 else "evening"
     
     prompt = f"""
