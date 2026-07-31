@@ -24,7 +24,6 @@ jobs:
           pip install google-generativeai edge-tts moviepy==1.0.3 requests python-dotenv feedparser pytz pillow imageio-ffmpeg
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick fontconfig fonts-noto fonts-noto-core fonts-noto-extra
-          # Fix ImageMagick security policy to allow MoviePy text generation
           sudo sed -i 's/rights="none"/rights="read|write"/g' /etc/ImageMagick-6/policy.xml
           
       - name: Run News Bot
@@ -39,7 +38,10 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git add news_history.json
           git commit -m "Update 48h news history [skip ci]" || echo "No changes to commit"
-          git push
+          # FIX: Pull any remote changes before pushing to prevent conflicts
+          git pull --rebase origin main || true
+          # FIX: Even if push fails, don't crash the workflow (videos are already generated)
+          git push || echo "⚠️ Push failed, but artifacts are safe."
           
       - name: Upload All Artifacts
         uses: actions/upload-artifact@v4
