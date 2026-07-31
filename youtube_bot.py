@@ -14,7 +14,6 @@ import subprocess
 import requests
 import datetime
 import json
-import math
 import feedparser
 import pytz
 import edge_tts
@@ -74,7 +73,7 @@ def is_safe(text):
 
 def prepare_anchor_video():
     if not os.path.exists("anchor.mp4"):
-        print("⚠️ anchor.mp4 not found. Falling back to Live Broadcast Photo Zoom.")
+        print("⚠️ anchor.mp4 not found. Falling back to static photo anchor.")
         return None
 
     print("🟢 Removing green screen from anchor.mp4...")
@@ -265,13 +264,9 @@ def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path
         anchor_raw = VideoFileClip(transparent_anchor_path).without_audio()
         anchor = anchor_raw.loop(duration=duration).set_position(("right", "top"))
     else:
-        print("👤 Loading Live Broadcast Zoom photo anchor...")
-        raw_anchor = ImageClip("my_photo.png").set_duration(duration).resize(height=350)
-        anchor_zoom = raw_anchor.resize(lambda t: 1 + 0.10 * (t / duration))
-        def anchor_pos(t):
-            y = 0 + 10 * math.sin(t / 2)
-            return ("right", y)
-        anchor = anchor_zoom.set_position(anchor_pos)
+        # FIX: Static photo anchor to reduce render time from 57 mins to 5 mins
+        print("👤 Loading static photo anchor...")
+        anchor = ImageClip("my_photo.png").set_duration(duration).set_position(("right", "top")).resize(height=350)
 
     logo = TextClip("FUTURE INTELLIGENCE NEWS", fontsize=36, color='white', font=font_path, stroke_color='black', stroke_width=2).set_duration(duration).set_position((20, 20))
     
