@@ -14,19 +14,18 @@ import subprocess
 import requests
 import datetime
 import json
+import math
 import feedparser
 import pytz
 import edge_tts
 from moviepy.editor import (
     VideoFileClip, ImageClip, AudioFileClip, CompositeVideoClip,
-    TextClip, ColorClip, CompositeAudioClip
+    TextClip, ColorClip, CompositeAudioClip, concatenate_videoclips
 )
 from moviepy.video.fx.all import colorx
-from moviepy.audio.fx.all import volumex
 from PIL import Image, ImageDraw, ImageFont
 
 # --- CONFIGURATION ---
-# Scaled down to English only to reduce API load and execution time
 LANGUAGES = {
     "English": {"tts": "en-IN-NeerjaNeural", "gemini_lang": "Indian English", "font": "Noto Sans Bold"}
 }
@@ -41,66 +40,35 @@ def get_system_font(font_name):
     except Exception: pass
     return "Roboto-Bold.ttf"
 
-def fetch_background_music():
-    print("🎵 Fetching background music...")
-    url = "https://www.soundjay.com/buttons/sounds/button-2.mp3"
-    try:
-        r = requests.get(url, timeout=10)
-        if r.status_code == 200 and 'audio' in r.headers.get('Content-Type', ''):
-            with open("news_theme.mp3", "wb") as f: f.write(r.content)
-            return True
-    except: pass
-    print("⚠️ Background music fetch failed. Proceeding without music.")
-    return False
-
-def fetch_background_video():
-    print("🎥 Fetching dynamic background video...")
+def fetch_background_images(headlines):
+    """Fetches a specific image for each news story to keep the video relevant and rendering fast."""
+    print("🖼️ Fetching relevant background images for stories...")
     headers = {"Authorization": os.environ.get("PEXELS_API_KEY")}
-    try:
-        r = requests.get("https://api.pexels.com/videos/search?query=technology&per_page=1", headers=headers, timeout=15)
-        if r.status_code == 200 and r.json()['videos']:
-            video_url = r.json()['videos'][0]['video_files'][0]['link']
-            with open("background_clip.mp4", "wb") as f: f.write(requests.get(video_url).content)
-            return True
-    except: pass
-    ColorClip(size=(1920, 1080), color=(0,0,0)).set_duration(10).write_videofile("background_clip.mp4", fps=24)
-    return True
+    image_paths = []
+    
+    for i, headline in enumerate(headlines[:5]):
+        search_query = " ".join(headline.split()[:3])
+        try:
+            r = requests.get(f"https://api.pexels.com/v1/search?query={search_query}&per_page=1", headers=headers, timeout=15)
+            if r.status_code == 200 and r.json()['photos']:
+                img_url = r.json()['photos'][0]['src']['large']
+                img_data = requests.get(img_url).content
+                path = f"bg_{i}.jpg"
+                with open(path, "wb") as f: f.write(img_data)
+                image_paths.append(path)
+            else:
+                ColorClip(size=(1920, 1080), color=(10, 10, 20)).save_frame(f"bg_{i}.jpg")
+                image_paths.append(f"bg_{i}.jpg")
+        except:
+            ColorClip(size=(1920, 1080), color=(10, 10, 20)).save_frame(f"bg_{i}.jpg")
+            image_paths.append(f"bg_{i}.jpg")
+            
+    return image_paths
 
 def is_safe(text):
     for word in BLOCKED_KEYWORDS:
         if word in text.lower(): return False
     return True
-
-def prepare_anchor_video():
-    if not os.path.exists("anchor.mp4"):
-        print("⚠️ anchor.mp4 not found. Falling back to static photo anchor.")
-        return None
-
-    print("🟢 Removing green screen from anchor.mp4...")
-    try:
-        import imageio_ffmpeg
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    except ImportError:
-        ffmpeg_exe = "ffmpeg"
-
-    output_path = "anchor_transparent.webm"
-    cmd = [
-        ffmpeg_exe, "-y", "-i", "anchor.mp4",
-        "-t", "15",
-        "-vf", "scale=-1:350,colorkey=0x00FF00:0.3:0.2,format=yuva420p",
-        "-c:v", "libvpx-vp9",
-        "-pix_fmt", "yuva420p",
-        "-b:v", "1M",
-        "-auto-alt-ref", "0",
-        output_path
-    ]
-    try:
-        subprocess.run(cmd, check=True)
-        print("✅ Anchor green screen removed and ready!")
-        return output_path
-    except subprocess.CalledProcessError as e:
-        print(f"⚠️ FFmpeg failed to process anchor: {e}")
-        return None
 
 # --- 1. NEWS FETCHER ---
 def get_fresh_news():
@@ -127,7 +95,7 @@ def get_fresh_news():
             
         fresh_news.append(title_clean)
         history.append({"title": title_clean, "timestamp": now.isoformat()})
-        if len(fresh_news) >= 15: break
+        if len(fresh_news) >= 5: break
             
     with open("news_history.json", "w") as f: json.dump(history, f, indent=4)
     return fresh_news
@@ -136,10 +104,7 @@ def get_fresh_news():
 def call_gemini(prompt):
     api_key = os.environ.get("GEMINI_API_KEY").strip()
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": api_key
-    }
+    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.8, "maxOutputTokens": 8192}
@@ -157,7 +122,9 @@ def call_gemini(prompt):
 
 def generate_content(headlines, language_name, gemini_lang):
     print(f"📝 Generating scripts & metadata for {language_name} via raw API...")
-    time_of_day = "morning" if datetime.datetime.now().hour < 12 else "evening"
+    ist_time = datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)
+    time_of_day = "morning" if ist_time.hour < 12 else "evening"
+    current_date_str = ist_time.strftime("%A, %B %d, %Y")
     
     prompt = f"""
     You are a top-tier prime-time news anchor for 'Future Intelligence News' in India.
@@ -165,7 +132,7 @@ def generate_content(headlines, language_name, gemini_lang):
     Do NOT translate literally. Write natively as a local news channel would speak.
     
     FOLLOW THIS EXACT BROADCAST STRUCTURE:
-    [INTRODUCTION] Welcome viewers. Mention date and {time_of_day} broadcast.
+    [INTRODUCTION] Welcome viewers. Mention today's exact date ({current_date_str}) and {time_of_day} broadcast.
     [HEADLINES] List top 3-4 stories in one sentence each.
     [DETAILED NEWS] Go deep into each story (2-3 mins each). Provide context and future impact.
     [CLOSING] Summarize biggest takeaway. Thank viewers.
@@ -190,7 +157,7 @@ def generate_content(headlines, language_name, gemini_lang):
     """
     return call_gemini(prompt)
 
-# --- 3. EDGE-TTS VOICE & SUBTITLES (FIXED) ---
+# --- 3. EDGE-TTS VOICE & SUBTITLES ---
 async def _generate_voice_async(text, tts_voice, srt_path, audio_path):
     communicate = edge_tts.Communicate(text, tts_voice)
     submaker = edge_tts.SubMaker()
@@ -209,7 +176,7 @@ async def _generate_voice_async(text, tts_voice, srt_path, audio_path):
         with open(srt_path, "w", encoding='utf-8') as f:
             f.write(subs)
     except Exception as e:
-        print(f"⚠️ Subtitle generation skipped due to library update: {e}")
+        print(f"⚠️ Subtitle generation skipped: {e}")
         with open(srt_path, "w", encoding='utf-8') as f:
             f.write("1\n00:00:00,000 --> 00:00:10,000\nSubtitles temporarily unavailable\n")
 
@@ -239,37 +206,26 @@ def generate_and_validate_voice(script, lang_name, gemini_lang, tts_voice, headl
         os.remove(audio_file); os.remove(srt_file)
     return generate_voice_and_subs(current_script, lang_name, tts_voice, "final")
 
-# --- 5. PRO VIDEO ASSEMBLY (LONG FORM) ---
-def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path, has_music, transparent_anchor_path):
-    print(f"🎬 Assembling Long-form {lang_name} Broadcast...")
+# --- 5. PRO VIDEO ASSEMBLY (LONG FORM - FAST RENDER) ---
+def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path, image_paths):
+    print(f"🎬 Assembling Long-form {lang_name} Broadcast (Fast Mode)...")
     audio = AudioFileClip(audio_file)
     duration = audio.duration
 
-    bg = VideoFileClip("background_clip.mp4").resize(height=1080).crop(width=1920)
-    bg = bg.loop(duration=duration) if bg.duration < duration else bg.subclip(0, duration)
-    bg = bg.fx(colorx, 0.55)
+    num_imgs = len(image_paths)
+    segment_duration = duration / num_imgs
+    
+    bg_clips = []
+    for i, img_path in enumerate(image_paths):
+        img_clip = ImageClip(img_path).set_duration(segment_duration).resize(height=1080).crop(width=1920)
+        overlay = ColorClip(size=(1920, 1080), color=(0, 0, 0)).set_duration(segment_duration).set_opacity(0.5)
+        bg_clips.append(CompositeVideoClip([img_clip, overlay]))
+        
+    bg = concatenate_videoclips(bg_clips)
 
-    if has_music and os.path.exists("news_theme.mp3"):
-        try:
-            music = AudioFileClip("news_theme.mp3").fx(volumex, 0.15).audio_loop(duration=duration)
-            mixed_audio = CompositeAudioClip([audio, music])
-        except Exception as e:
-            print(f"⚠️ Music file corrupted, proceeding without music. Error: {e}")
-            mixed_audio = audio
-    else: 
-        mixed_audio = audio
-
-    if transparent_anchor_path:
-        print("👤 Loading looping video anchor...")
-        anchor_raw = VideoFileClip(transparent_anchor_path).without_audio()
-        anchor = anchor_raw.loop(duration=duration).set_position(("right", "top"))
-    else:
-        # FIX: Static photo anchor to reduce render time from 57 mins to 5 mins
-        print("👤 Loading static photo anchor...")
-        anchor = ImageClip("my_photo.png").set_duration(duration).set_position(("right", "top")).resize(height=350)
+    anchor = ImageClip("my_photo.png").set_duration(duration).set_position(("right", "top")).resize(height=350)
 
     logo = TextClip("FUTURE INTELLIGENCE NEWS", fontsize=36, color='white', font=font_path, stroke_color='black', stroke_width=2).set_duration(duration).set_position((20, 20))
-    
     live_dot = ColorClip(size=(20, 20), color=(220, 0, 0)).set_duration(duration).set_position((20, 70))
     live_text = TextClip("LIVE", fontsize=24, color='white', font=font_path, stroke_color='red', stroke_width=1).set_duration(duration).set_position((50, 68))
     
@@ -283,21 +239,21 @@ def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path
 
     lower_thirds = []
     for i, hl in enumerate(headlines[:3]):
-        start = 60 + (i * 120)
+        start = int(i * segment_duration) + 10
         if start < duration:
             lt_bg = ColorClip(size=(1000, 60), color=(0, 0, 0)).set_duration(20).set_position((20, 850)).set_opacity(0.8).set_start(start)
             lt_text = TextClip(hl[:60] + "...", fontsize=28, color='yellow', font=font_path, stroke_color='black', stroke_width=1).set_duration(20).set_position((30, 855)).set_start(start)
             lower_thirds.extend([lt_bg, lt_text])
 
-    final_video = CompositeVideoClip([bg, logo, live_dot, live_text, clock, anchor, ticker_bg, ticker_label, ticker_clip] + lower_thirds).set_audio(mixed_audio)
+    final_video = CompositeVideoClip([bg, logo, live_dot, live_text, clock, anchor, ticker_bg, ticker_label, ticker_clip] + lower_thirds).set_audio(audio)
     
     output_file = f"final_news_{lang_name}.mp4"
-    final_video.write_videofile(output_file, codec="libx264", audio_codec="aac", fps=30, threads=4, preset="medium")
+    final_video.write_videofile(output_file, codec="libx264", audio_codec="aac", fps=24, threads=4, preset="ultrafast")
     os.remove(audio_file)
     return output_file
 
 # --- 6. SHORTS ASSEMBLY ---
-def assemble_shorts(short_script, lang_name, tts_voice, font_path, transparent_anchor_path):
+def assemble_shorts(short_script, lang_name, tts_voice, font_path, image_paths):
     print(f"📱 Assembling {lang_name} Short...")
     audio_file = f"short_voice_{lang_name}.mp3"
     asyncio.run(_generate_voice_async(short_script, tts_voice, f"short_subs_{lang_name}.srt", audio_file))
@@ -305,41 +261,64 @@ def assemble_shorts(short_script, lang_name, tts_voice, font_path, transparent_a
     duration = min(audio.duration, 55)
     audio = audio.subclip(0, duration)
 
-    bg = VideoFileClip("background_clip.mp4").resize(height=1920).crop(width=1080)
-    bg = bg.loop(duration=duration) if bg.duration < duration else bg.subclip(0, duration)
-    bg = bg.fx(colorx, 0.6)
+    bg_img = ImageClip(image_paths[0]).set_duration(duration).resize(height=1920).crop(width=1080)
+    overlay = ColorClip(size=(1080, 1920), color=(0, 0, 0)).set_duration(duration).set_opacity(0.6)
+    bg = CompositeVideoClip([bg_img, overlay])
 
-    if transparent_anchor_path:
-        anchor_raw = VideoFileClip(transparent_anchor_path).without_audio()
-        anchor = anchor_raw.loop(duration=duration).set_position(("center", "bottom")).resize(height=500)
-    else:
-        anchor = ImageClip("my_photo.png").set_duration(duration).set_position(("center", "bottom")).resize(height=500)
-
+    anchor = ImageClip("my_photo.png").set_duration(duration).set_position(("center", "bottom")).resize(height=500)
     text_clip = TextClip("FUTURE INTELLIGENCE", fontsize=50, color='white', font=font_path, stroke_color='black', stroke_width=2).set_duration(duration).set_position(("center", 0.1))
 
     final_video = CompositeVideoClip([bg, text_clip, anchor]).set_audio(audio)
     output_file = f"shorts_{lang_name}.mp4"
-    final_video.write_videofile(output_file, codec="libx264", audio_codec="aac", fps=30, threads=4, preset="medium")
+    final_video.write_videofile(output_file, codec="libx264", audio_codec="aac", fps=24, threads=4, preset="ultrafast")
     os.remove(audio_file)
     return output_file
 
-# --- 7. AUTO-THUMBNAIL GENERATOR ---
-def generate_thumbnail(lang_name, top_headline, font_path):
-    print(f"🖼️ Generating {lang_name} Thumbnail...")
-    img = Image.new('RGB', (1280, 720), color=(10, 10, 10))
-    draw = ImageDraw.Draw(img)
-    draw.rectangle([0, 500, 1280, 720], fill=(180, 0, 0))
-    
+# --- 7. PRO AUTO-THUMBNAIL GENERATOR (NO ANCHOR PHOTO) ---
+def generate_thumbnail(lang_name, top_headline, font_path, bg_image_path):
+    print(f"🖼️ Generating Professional {lang_name} Thumbnail...")
+    W, H = 1280, 720
     try:
-        anchor = Image.open("my_photo.png").resize((400, 400))
-        img.paste(anchor, (850, 50))
-    except: pass
+        # Use the relevant news background image
+        img = Image.open(bg_image_path).resize((W, H))
+    except:
+        img = Image.new('RGB', (W, H), color=(5, 5, 15))
         
-    font_title = ImageFont.truetype(font_path, 60)
-    font_headline = ImageFont.truetype(font_path, 45)
+    draw = ImageDraw.Draw(img, "RGBA")
     
-    draw.text((20, 20), "BREAKING NEWS", fill="red", font=font_title)
-    draw.text((20, 540), top_headline[:40] + "...", fill="white", font=font_headline)
+    # Darken the background heavily so text pops
+    draw.rectangle([0, 0, W, H], fill=(0, 0, 0, 160)) 
+    
+    # Red Breaking News Banner
+    draw.rectangle([0, 0, W, 90], fill=(220, 0, 0, 255))
+    font_banner = ImageFont.truetype(font_path, 50)
+    draw.text((40, 15), "BREAKING NEWS", fill="white", font=font_banner)
+    
+    # Main Headline Text (wrapped)
+    font_headline = ImageFont.truetype(font_path, 65)
+    words = top_headline.split()
+    lines = []
+    current_line = ""
+    for word in words:
+        test_line = (current_line + " " + word).strip()
+        bbox = draw.textbbox((0,0), test_line, font=font_headline)
+        if bbox[2] - bbox[0] <= 1150: 
+            current_line = test_line
+        else:
+            if current_line: lines.append(current_line)
+            current_line = word
+    if current_line: lines.append(current_line)
+    
+    y = 250
+    for line in lines[:4]:
+        draw.text((42, y+2), line, fill=(0,0,0), font=font_headline)
+        draw.text((40, y), line, fill="yellow", font=font_headline)
+        y += 75
+    
+    # Bottom Banner
+    draw.rectangle([0, 650, W, H], fill=(200, 0, 0, 255))
+    font_channel = ImageFont.truetype(font_path, 35)
+    draw.text((40, 665), "FUTURE INTELLIGENCE NEWS", fill="white", font=font_channel)
     
     output_file = f"thumbnail_{lang_name}.jpg"
     img.save(output_file, quality=95)
@@ -347,15 +326,13 @@ def generate_thumbnail(lang_name, top_headline, font_path):
 
 # --- MAIN EXECUTION ---
 if __name__ == "__main__":
-    has_music = fetch_background_music()
-    fetch_background_video()
-    transparent_anchor_path = prepare_anchor_video()
-    
     fresh_news = get_fresh_news()
     if not fresh_news:
         print("❌ No fresh news found in the last 24 hours. Exiting.")
         exit()
 
+    image_paths = fetch_background_images(fresh_news)
+    
     for lang_name, lang_data in LANGUAGES.items():
         print(f"\n--- Processing {lang_name} Channel ---")
         font_path = get_system_font(lang_data["font"])
@@ -387,8 +364,10 @@ if __name__ == "__main__":
         with open(f"youtube_metadata_{lang_name}.txt", "w", encoding='utf-8') as f: f.write(metadata)
             
         audio_file, srt_file = generate_and_validate_voice(long_script, lang_name, lang_data["gemini_lang"], lang_data["tts"], fresh_news)
-        assemble_long_video(audio_file, ticker_text, lang_name, fresh_news, font_path, has_music, transparent_anchor_path)
-        assemble_shorts(short_script, lang_name, lang_data["tts"], font_path, transparent_anchor_path)
-        generate_thumbnail(lang_name, fresh_news[0], font_path)
+        assemble_long_video(audio_file, ticker_text, lang_name, fresh_news, font_path, image_paths)
+        assemble_shorts(short_script, lang_name, lang_data["tts"], font_path, image_paths)
+        
+        # Pass the first news image to be used as the thumbnail background
+        generate_thumbnail(lang_name, fresh_news[0], font_path, image_paths[0])
         
     print("\n✅ ALL ASSETS GENERATED SUCCESSFULLY! READY FOR MANUAL UPLOAD.")
