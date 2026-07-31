@@ -27,13 +27,9 @@ from moviepy.audio.fx.all import volumex
 from PIL import Image, ImageDraw, ImageFont
 
 # --- CONFIGURATION ---
+# Scaled down to English only to reduce API load and execution time
 LANGUAGES = {
-    "English": {"tts": "en-IN-NeerjaNeural", "gemini_lang": "Indian English", "font": "Noto Sans Bold"},
-    "Hindi": {"tts": "hi-IN-SwaraNeural", "gemini_lang": "Hindi", "font": "Noto Sans Devanagari Bold"},
-    "Tamil": {"tts": "ta-IN-PallaviNeural", "gemini_lang": "Tamil", "font": "Noto Sans Tamil Bold"},
-    "Telugu": {"tts": "te-IN-ShrutiNeural", "gemini_lang": "Telugu", "font": "Noto Sans Telugu Bold"},
-    "Malayalam": {"tts": "ml-IN-SobhanaNeural", "gemini_lang": "Malayalam", "font": "Noto Sans Malayalam Bold"},
-    "Kannada": {"tts": "kn-IN-SapnaNeural", "gemini_lang": "Kannada", "font": "Noto Sans Kannada Bold"}
+    "English": {"tts": "en-IN-NeerjaNeural", "gemini_lang": "Indian English", "font": "Noto Sans Bold"}
 }
 
 BLOCKED_KEYWORDS = ["war", "dead", "death", "kill", "attack", "suicide", "terror", "blood", "gore", "shoot", "bomb", "tragedy", "casualt"]
@@ -282,7 +278,6 @@ def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path
     live_dot = ColorClip(size=(20, 20), color=(220, 0, 0)).set_duration(duration).set_position((20, 70))
     live_text = TextClip("LIVE", fontsize=24, color='white', font=font_path, stroke_color='red', stroke_width=1).set_duration(duration).set_position((50, 68))
     
-    # FIX: Static clock to prevent MoviePy frame-by-frame ImageMagick crashes
     ist_time = datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)
     clock_str = ist_time.strftime("%H:%M:%S IST")
     clock = TextClip(clock_str, fontsize=22, color='white', font=font_path).set_duration(duration).set_position((20, 100))
