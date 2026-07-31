@@ -47,7 +47,6 @@ def fetch_background_images(headlines):
     image_paths = []
     
     for i, headline in enumerate(headlines[:5]):
-        # FIX: Strip stop words to get actual keywords for Pexels search
         words = [word for word in headline.split() if word.lower() not in STOP_WORDS]
         search_query = " ".join(words[:3]) if words else "technology"
         
@@ -73,7 +72,7 @@ def is_safe(text):
         if word in text.lower(): return False
     return True
 
-# --- 1. NEWS FETCHER (TIMEZONE FIX) ---
+# --- 1. NEWS FETCHER ---
 def get_fresh_news():
     print("📰 Fetching latest Future Intelligence news...")
     url = "https://news.google.com/rss/search?q=artificial+intelligence+stocks+OR+crypto+news+OR+tech+business+latest+news&hl=en-US&gl=US&ceid=US:en"
@@ -83,7 +82,6 @@ def get_fresh_news():
     if os.path.exists("news_history.json"):
         with open("news_history.json", "r") as f: history = json.load(f)
             
-    # FIX: Use timezone-aware UTC now to prevent 5.5h skew in India
     utc_now = datetime.datetime.now(pytz.UTC)
     cutoff_time = utc_now - datetime.timedelta(hours=48)
     history = [h for h in history if datetime.datetime.fromisoformat(h["timestamp"]) > cutoff_time]
@@ -135,9 +133,12 @@ def generate_content(headlines, language_name, gemini_lang):
     current_date_str = ist_time.strftime("%A, %B %d, %Y")
     
     prompt = f"""
-    You are a top-tier prime-time news anchor for 'Future Intelligence News' in India.
+    You are an energetic, casual tech news anchor for 'Future Intelligence News' in India.
     Write a highly detailed 1,500+ word broadcast script in **{gemini_lang}** based on these latest headlines: {headlines}.
-    Do NOT translate literally. Write natively as a local news channel would speak.
+    Do NOT translate literally. Write natively as a local Indian tech creator would speak. 
+    
+    Use conversational Indian English slang (e.g., "guys", "let's break this down", "mind-blowing stuff", "literally", "tbh", "crore/lakh"). 
+    Keep it professional enough for news, but make it feel like a friendly, high-energy tech YouTuber is explaining the news to their audience.
     
     FOLLOW THIS EXACT BROADCAST STRUCTURE:
     [INTRODUCTION] Welcome viewers. Mention today's exact date ({current_date_str}) and {time_of_day} broadcast.
@@ -215,7 +216,7 @@ def generate_and_validate_voice(script, lang_name, gemini_lang, tts_voice, headl
         os.remove(audio_file); os.remove(srt_file)
     return generate_voice_and_subs(current_script, lang_name, tts_voice, "final")
 
-# --- 5. PRO VIDEO ASSEMBLY (WITH SAFE IMAGE CROP & TICKER FIX) ---
+# --- 5. PRO VIDEO ASSEMBLY ---
 def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path, image_paths):
     print(f"🎬 Assembling Long-form {lang_name} Broadcast (Pro Mode)...")
     audio = AudioFileClip(audio_file)
@@ -226,7 +227,6 @@ def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path
     
     bg_clips = []
     for i, img_path in enumerate(image_paths):
-        # FIX: Safe resize to prevent crashes on portrait images
         img_clip = ImageClip(img_path).fx(colorx, 0.6).resize((1920, 1080))
         clip = img_clip.set_duration(segment_duration)
         
@@ -236,7 +236,6 @@ def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path
         
     bg = concatenate_videoclips(bg_clips, method="compose", padding=-0.5)
 
-    # FIX: Gracefully skip anchor if my_photo.png is missing
     layers = [bg]
     if os.path.exists("my_photo.png"):
         anchor = ImageClip("my_photo.png").set_duration(duration).set_position(("right", "top")).resize(height=350)
@@ -255,7 +254,6 @@ def assemble_long_video(audio_file, ticker_text, lang_name, headlines, font_path
     ticker_bg = ColorClip(size=(1920, 80), color=(180, 0, 0)).set_duration(duration).set_position(("center", "bottom"))
     ticker_label = TextClip("BREAKING", fontsize=36, color='black', font=font_path).set_duration(duration).set_position((10, 1010))
     
-    # FIX: Ticker speed based on text width so it traverses exactly once
     ticker_clip = TextClip(ticker_text, fontsize=38, color='white', font=font_path).set_duration(duration)
     text_width = ticker_clip.w
     total_distance = text_width + 1920
