@@ -2,7 +2,7 @@ name: Daily Multi-Language News Generator
 
 on:
   schedule:
-    - cron: '0 8,20 * * *'  # 8 AM and 8 PM UTC
+    - cron: '0 8,20 * * *'
   workflow_dispatch:
 
 jobs:
@@ -21,10 +21,14 @@ jobs:
           
       - name: Install dependencies, Fonts & ImageMagick
         run: |
-          pip install google-generativeai edge-tts moviepy==1.0.3 requests python-dotenv feedparser pytz pillow imageio-ffmpeg
+          pip install google-generativeai edge-tts moviepy==1.0.3 requests python-dotenv feedparser pytz pillow imageio-ffmpeg google-api-python-client google-auth-oauthlib
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick fontconfig fonts-noto fonts-noto-core fonts-noto-extra
           sudo sed -i 's/rights="none"/rights="read|write"/g' /etc/ImageMagick-6/policy.xml
+          
+      - name: Create YouTube Token File
+        run: |
+          echo '${{ secrets.YOUTUBE_TOKEN }}' > token.json
           
       - name: Run News Bot
         env:
@@ -38,9 +42,7 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git add news_history.json
           git commit -m "Update 48h news history [skip ci]" || echo "No changes to commit"
-          # FIX: Pull any remote changes before pushing to prevent conflicts
           git pull --rebase origin main || true
-          # FIX: Even if push fails, don't crash the workflow (videos are already generated)
           git push || echo "⚠️ Push failed, but artifacts are safe."
           
       - name: Upload All Artifacts
