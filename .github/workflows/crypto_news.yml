@@ -1,0 +1,34 @@
+name: Crypto News Bot
+
+on:
+  schedule:
+    - cron: '0 14 * * *'  # Runs once a day at 2:00 PM UTC
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with: python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          pip install google-generativeai edge-tts moviepy==1.0.3 requests python-dotenv feedparser pytz pillow imageio-ffmpeg google-api-python-client google-auth-oauthlib
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg imagemagick fontconfig fonts-noto-core
+          sudo sed -i 's/rights="none"/rights="read|write"/g' /etc/ImageMagick-6/policy.xml
+          
+      - name: Create YouTube Token File 2
+        run: echo '${{ secrets.YOUTUBE_TOKEN_2 }}' > token.json
+          
+      - name: Run Crypto News Bot
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+        run: python youtube_bot.py CryptoNews
