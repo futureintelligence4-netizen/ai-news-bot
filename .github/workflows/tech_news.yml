@@ -25,7 +25,7 @@ jobs:
           sudo sed -i 's/rights="none"/rights="read|write"/g' /etc/ImageMagick-6/policy.xml
           
       - name: Create YouTube Token File
-        run: echo '${{ secrets.YOUTUBE_TOKEN }}' > token.json
+        run: printf '%s' "${{ secrets.YOUTUBE_TOKEN }}" > token.json
           
       - name: Run Tech News Bot
         env:
