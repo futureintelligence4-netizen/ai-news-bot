@@ -5,7 +5,6 @@ import asyncio
 import subprocess
 import requests
 import datetime
-import math
 import sys
 import feedparser
 import pytz
@@ -22,6 +21,15 @@ from PIL import Image, ImageDraw, ImageFont
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
+
+# --- MOVIEPY IMAGEMAGICK FIX ---
+import moviepy.config as mp_config
+if shutil.which("convert"):
+    mp_config.change_settings({"IMAGEMAGICK_BINARY": shutil.which("convert")})
+
+# --- PILLOW COMPATIBILITY PATCH ---
+import PIL.Image
+if not hasattr(PIL.Image, 'ANTIALIAS'): PIL.Image.ANTIALIAS = PIL.Image.Resampling.LANCZOS
 
 # --- CONFIGURATION ---
 CHANNELS = {
@@ -51,7 +59,7 @@ def upload_to_youtube(video_path, title, description, tags, token_env):
     print(f"📤 Uploading {video_path} to YouTube...")
     token_json_str = os.environ.get(token_env)
     if not token_json_str:
-        print(f"❌ {token_env} not found in secrets! Skipping upload. Video saved in Artifacts.")
+        print(f"❌ {token_env} not found in secrets! Skipping upload.")
         return
 
     with open("temp_token.json", "w") as f: f.write(token_json_str)
@@ -237,7 +245,12 @@ def assemble_shorts(short_script, tag, tts_voice, font_path, image_paths):
     print(f"📱 Assembling {tag} Short...")
     audio_file = f"short_voice_{tag}.mp3"
     asyncio.run(_generate_voice_async(short_script, tts_voice, f"short_subs_{tag}.srt", audio_file))
-    audio = AudioFileClip(audio_file).subclip(0, min(AudioFileClip(audio_file).duration, 55))
+    
+    # FIX: Load audio once to prevent memory leaks
+    audio_raw = AudioFileClip(audio_file)
+    duration = min(audio_raw.duration, 55)
+    audio = audio_raw.subclip(0, duration)
+
     bg = ImageClip(image_paths[0]).fx(colorx, 0.6).resize((1080, 1920)).set_duration(audio.duration)
     layers = [bg]
     if os.path.exists("my_photo.png"):
@@ -300,15 +313,25 @@ if __name__ == "__main__":
     raw_output = generate_content(config["name"], fresh_news, config["gemini_lang"])
     if not raw_output: exit()
         
+    # FIX: Bulletproof parsing to prevent IndexError crashes
     try:
-        long_script = raw_output.split("[LONG_SCRIPT]")[1].split("[SHORT_SCRIPT]")[0].strip()
-        short_script = raw_output.split("[SHORT_SCRIPT]")[1].split("[METADATA]")[0].strip()
-        metadata = raw_output.split("[METADATA]")[1].split("[TICKER_TEXT]")[0].strip()
-        ticker_text = raw_output.split("[TICKER_TEXT]")[1].strip().split("\n")[0]
-        title = [l for l in metadata.split('\n') if l.startswith('Title:')][0].replace('Title:', '').strip()
-        description = "\n".join([l for l in metadata.split('\n') if l.startswith('Description:')]).replace('Description:', '').strip()
-        tags_line = [l for l in metadata.split('\n') if l.startswith('Tags:')][0].replace('Tags:', '').strip()
-        tags = [t.strip() for t in tags_line.split(',')]
+        long_script = raw_output.split("[LONG_SCRIPT]")[1].split("[SHORT_SCRIPT]")[0].strip() if "[LONG_SCRIPT]" in raw_output else ""
+        short_script = raw_output.split("[SHORT_SCRIPT]")[1].split("[METADATA]")[0].strip() if "[SHORT_SCRIPT]" in raw_output else ""
+        metadata = raw_output.split("[METADATA]")[1].split("[TICKER_TEXT]")[0].strip() if "[METADATA]" in raw_output else ""
+        ticker_text = raw_output.split("[TICKER_TEXT]")[1].strip().split("\n")[0] if "[TICKER_TEXT]" in raw_output else "Breaking News"
+        
+        title = "Tech News Update"
+        description = "Latest technology news."
+        tags = ["tech", "news"]
+        
+        if "Title:" in metadata:
+            title = [l for l in metadata.split('\n') if l.startswith('Title:')][0].replace('Title:', '').strip()
+        if "Description:" in metadata:
+            description = "\n".join([l for l in metadata.split('\n') if l.startswith('Description:')]).replace('Description:', '').strip()
+        if "Tags:" in metadata:
+            tags_line = [l for l in metadata.split('\n') if l.startswith('Tags:')][0].replace('Tags:', '').strip()
+            tags = [t.strip() for t in tags_line.split(',')]
+            
     except Exception as e:
         print(f"❌ Error parsing output: {e}"); exit()
 
