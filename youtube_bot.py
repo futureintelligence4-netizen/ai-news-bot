@@ -159,20 +159,20 @@ def generate_content(headlines, language_name, gemini_lang):
     
     prompt = f"""
     You are an energetic, casual tech news anchor for 'Future Intelligence News' in India.
-    Write a highly detailed 1,500+ word broadcast script in **{gemini_lang}** based on these headlines: {headlines}.
+    Write a highly detailed 800-word broadcast script in **{gemini_lang}** based on these headlines: {headlines}.
     Use conversational Indian English slang (e.g., "guys", "let's break this down", "mind-blowing stuff"). 
     
     FOLLOW THIS EXACT BROADCAST STRUCTURE:
     [INTRODUCTION] Welcome viewers. Mention today's exact date ({current_date_str}) and {time_of_day} broadcast.
     [HEADLINES] List top 3-4 stories in one sentence each.
-    [DETAILED NEWS] Go deep into each story (2-3 mins each).
+    [DETAILED NEWS] Go deep into each story (1 min each).
     [CLOSING] Summarize biggest takeaway. Thank viewers.
     [NEXT TIME HINT] Tease next broadcast.
     
     ALSO GENERATE:
     1. A 150-word version of this script for a 60-second YouTube Short.
     2. A YouTube Title (Max 60 chars) that creates a MASSIVE CURIOSITY GAP.
-    3. A YouTube Description with chapters (0:00 Intro, 1:30 Story 1, etc.) and 5 SEO Tags.
+    3. A YouTube Description with chapters (0:00 Intro, 1:00 Story 1, etc.) and 5 SEO Tags.
     4. A short 5-8 word Breaking News Ticker text in {gemini_lang}.
     
     Format output strictly as:
@@ -210,16 +210,17 @@ def generate_voice_and_subs(text, lang_name, tts_voice, prefix="temp"):
     asyncio.run(_generate_voice_async(text, tts_voice, srt_path, audio_path))
     return audio_path, srt_path
 
-# --- 4. 8-MINUTE VALIDATION LOOP ---
+# --- 4. 5-MINUTE VALIDATION LOOP (Optimized for speed) ---
 def generate_and_validate_voice(script, lang_name, gemini_lang, tts_voice, headlines):
-    max_attempts, attempt, current_script = 3, 0, script
+    max_attempts, attempt, current_script = 2, 0, script
     while attempt < max_attempts:
         audio_file, srt_file = generate_voice_and_subs(current_script, lang_name, tts_voice, "final")
         duration = AudioFileClip(audio_file).duration
         print(f"⏱️ Validation Check: Audio is {duration/60:.2f} minutes long.")
-        if duration >= 480: return audio_file, srt_file
+        # FIX: Changed to 300 seconds (5 minutes) to reduce load
+        if duration >= 300: return audio_file, srt_file
         attempt += 1
-        extra = call_gemini(f"The following {gemini_lang} script is too short. Add 500 words of deep analysis about {headlines} before the closing. Return ONLY the new text.\n\nScript: {current_script}")
+        extra = call_gemini(f"The following {gemini_lang} script is too short. Add 300 words of deep analysis about {headlines} before the closing. Return ONLY the new text.\n\nScript: {current_script}")
         current_script = current_script.replace("[CLOSING]", f"{extra}\n\n[CLOSING]")
         os.remove(audio_file); os.remove(srt_file)
     return generate_voice_and_subs(current_script, lang_name, tts_voice, "final")
