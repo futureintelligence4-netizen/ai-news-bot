@@ -340,6 +340,7 @@ if __name__ == "__main__":
     short_video = assemble_shorts(short_script, target_channel, config["tts"], get_system_font(config["font"]), image_paths)
     thumb_file = generate_thumbnail(target_channel, fresh_news[0], get_system_font(config["font"]), thumb_bg)
     
+    # --- AUTOMATIC UPLOAD ---
     upload_to_youtube(long_video, f"{title} | {config['name']}", f"{description}\n\n#AI #TechNews #{target_channel}", tags, config["token_env"])
     if os.path.exists(long_video): os.remove(long_video)
     
