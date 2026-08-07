@@ -51,12 +51,15 @@ jobs:
           
           if [[ "$CHANNEL" == "FutureIntelligence" ]]; then
             printf '%s' "${{ secrets.YOUTUBE_TOKEN }}" > token.json
+            echo "youtube_token_env=${{ secrets.YOUTUBE_TOKEN }}" >> $GITHUB_ENV
           else
             printf '%s' "${{ secrets.YOUTUBE_TOKEN_2 }}" > token.json
+            echo "youtube_token_env=${{ secrets.YOUTUBE_TOKEN_2 }}" >> $GITHUB_ENV
           fi
           
       - name: Run Bot
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          YOUTUBE_TOKEN: ${{ env.youtube_token_env }}
         run: python youtube_bot.py ${{ steps.config.outputs.target_channel }}
