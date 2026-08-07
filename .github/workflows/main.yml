@@ -33,33 +33,11 @@ jobs:
           sudo apt-get install -y ffmpeg imagemagick fontconfig fonts-noto-core
           sudo sed -i 's/rights="none"/rights="read|write"/g' /etc/ImageMagick-6/policy.xml
           
-      - name: Determine Channel & Token
-        id: config
-        run: |
-          # If triggered manually, use the dropdown choice
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            CHANNEL="${{ github.event.inputs.channel }}"
-          # If triggered by 8 AM schedule, run Tech
-          elif [[ "${{ github.event.schedule }}" == "0 8 * * *" ]]; then
-            CHANNEL="FutureIntelligence"
-          # If triggered by 2 PM schedule, run Crypto
-          else
-            CHANNEL="CryptoNews"
-          fi
-          
-          echo "target_channel=$CHANNEL" >> $GITHUB_OUTPUT
-          
-          if [[ "$CHANNEL" == "FutureIntelligence" ]]; then
-            printf '%s' "${{ secrets.YOUTUBE_TOKEN }}" > token.json
-            echo "youtube_token_env=${{ secrets.YOUTUBE_TOKEN }}" >> $GITHUB_ENV
-          else
-            printf '%s' "${{ secrets.YOUTUBE_TOKEN_2 }}" > token.json
-            echo "youtube_token_env=${{ secrets.YOUTUBE_TOKEN_2 }}" >> $GITHUB_ENV
-          fi
-          
       - name: Run Bot
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-          YOUTUBE_TOKEN: ${{ env.youtube_token_env }}
-        run: python youtube_bot.py ${{ steps.config.outputs.target_channel }}
+          # Pass both tokens simultaneously. Your Python script will use the correct one.
+          YOUTUBE_TOKEN: ${{ secrets.YOUTUBE_TOKEN }}
+          YOUTUBE_TOKEN_2: ${{ secrets.YOUTUBE_TOKEN_2 }}
+        run: python youtube_bot.py ${{ github.event.inputs.channel || 'FutureIntelligence' }}
