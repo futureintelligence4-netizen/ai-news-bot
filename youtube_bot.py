@@ -6,17 +6,29 @@ import xml.etree.ElementTree as ET
 from gtts import gTTS
 from moviepy.editor import ImageClip, AudioFileClip
 from PIL import Image, ImageDraw, ImageFont
+
+# Google API Libraries
 import google.generativeai as genai
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
-# =================.CONFIGURATION=================
+# ================= CONFIGURATION =================
 
-# Set your Gemini API Key in your environment variables, or paste it here
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
+# Gemini API Configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE") # Replace with your Gemini key
 genai.configure(api_key=GEMINI_API_KEY)
+GEMINI_MODEL = "gemini-2.0-flash"
 
-# Fixed: Using a valid model name to prevent 503 errors
-GEMINI_MODEL = "gemini-2.0-flash" 
+# YouTube API Configuration (Using Token 1)
+YT_CLIENT_ID = "903336264135-lridj177v4k8d9r47nanps58lg0se9pn.apps.googleusercontent.com"
+YT_CLIENT_SECRET = "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"
+YT_REFRESH_TOKEN = "1//0gF0ciG-pzhIbCgYIARAAGBASNwF-L9Ir8AwnvUb7a7RjGYjqddTnWpLTRF_jCB_PYnmXL57SmcUXe_caF1tVQbi9omq64ZQgxpE"
+YT_TOKEN_URI = "https://oauth2.googleapis.com/token"
+YT_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
+# Channel Configuration
 CHANNELS = {
     "FutureIntelligence": {
         "name": "Future Intelligence News",
@@ -25,23 +37,20 @@ CHANNELS = {
     }
 }
 
-# =================COMPONENTS=================
+# ================= COMPONENTS =================
 
 def fetch_latest_news(topic):
     print(f"📰 Fetching latest news for: {topic}...")
-    # Using Google News RSS for reliable, real-time news fetching
     url = f"https://news.google.com/rss/search?q={topic.replace(' ', '+')}&hl=en-US&gl=US&ceid=US:en"
     
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
-        
         root = ET.fromstring(response.content)
         item = root.find('.//item')
         
         if item is not None:
             title = item.find('title').text
-            # Clean up HTML entities that sometimes appear in RSS titles
             title = title.replace("&#39;", "'").replace("&quot;", '"')
             return title
         return "AI Technology sees major breakthroughs in global markets"
@@ -51,8 +60,7 @@ def fetch_latest_news(topic):
 
 def fetch_background_image(query):
     print("🖼️ Fetching relevant background images...")
-    # Using LoremFlickr for a free, reliable stock photo without API keys
-    img_url = f"https://loremflickr.com/1280/720/artificialintelligence,technology"
+    img_url = "https://loremflickr.com/1280/720/artificialintelligence,technology"
     
     try:
         response = requests.get(img_url, stream=True, timeout=10)
@@ -73,22 +81,24 @@ def generate_thumbnail(image_path, news_title):
         draw = ImageDraw.Draw(img)
         
         # Add a dark overlay so text is readable
-        overlay = Image.new('RGBA', img.size, (0, 0, 0, 100))
+        overlay = Image.new('RGBA', img.size, (0, 0, 0, 120))
         img.paste(overlay, (0, 0), overlay)
         
-        # Load a default font
         try:
-            font = ImageFont.truetype("arial.ttf", 40)
+            font_large = ImageFont.truetype("arial.ttf", 50)
+            font_small = ImageFont.truetype("arial.ttf", 30)
         except:
-            font = ImageFont.load_default()
+            font_large = ImageFont.load_default()
+            font_small = ImageFont.load_default()
 
-        # Add text
-        draw.text((50, 300), "FUTURE INTELLIGENCE", fill="red", font=font)
-        draw.text((50, 360), news_title[:60] + "...", fill="white", font=font)
+        draw.text((50, 250), "FUTURE INTELLIGENCE", fill="red", font=font_large)
+        draw.text((50, 320), news_title[:60] + "...", fill="white", font=font_small)
         
         img.save("thumbnail.jpg")
+        return "thumbnail.jpg"
     except Exception as e:
         print(f"⚠️ Thumbnail generation warning: {e}")
+        return image_path
 
 def generate_script(news_title, channel_name):
     print(f"📝 Generating script for {channel_name}...")
@@ -102,7 +112,6 @@ def generate_script(news_title, channel_name):
     
     model = genai.GenerativeModel(GEMINI_MODEL)
     
-    # Retry mechanism to handle transient 503/500 API errors
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -111,7 +120,7 @@ def generate_script(news_title, channel_name):
         except Exception as e:
             print(f"⚠️ API call failed (attempt {attempt + 1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
-                time.sleep(3) # Wait 3 seconds before retrying
+                time.sleep(3)
             else:
                 print("❌ All API retries exhausted. Using fallback script.")
                 return f"Breaking news today. {news_title}. We will continue to monitor this developing story."
@@ -132,14 +141,73 @@ def render_video(image_path, audio_path):
     video_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", verbose=False, logger=None)
     return output_path
 
-def upload_to_youtube(video_path, title):
+def upload_to_youtube(video_path, title, thumbnail_path):
     print("📤 Uploading to YouTube...")
-    # NOTE: This is a simplified placeholder. Real YouTube uploads require OAuth2 
-    # setup and the google-api-python-client. 
-    print(f"✅ [SIMULATED UPLOAD] Video '{title}' would be uploaded from {video_path}.")
-    # To implement real uploads, follow: https://developers.google.com/youtube/v3/quickstart/python
+    
+    try:
+        # 1. Initialize Credentials and Refresh Token
+        creds = Credentials(
+            token=None,
+            refresh_token=YT_REFRESH_TOKEN,
+            token_uri=YT_TOKEN_URI,
+            client_id=YT_CLIENT_ID,
+            client_secret=YT_CLIENT_SECRET,
+            scopes=YT_SCOPES
+        )
+        creds.refresh(Request()) # Automatically refreshes the access token
+        
+        # 2. Build YouTube API Service
+        youtube = build("youtube", "v3", credentials=creds)
+        
+        # 3. Prepare Upload Body
+        body = {
+            "snippet": {
+                "title": title[:100], # YouTube title limit is 100 characters
+                "description": f"Breaking AI and Tech News: {title}\n\n#AI #TechNews #FutureIntelligence",
+                "tags": ["AI", "Tech News", "Artificial Intelligence", "Future Intelligence"],
+                "categoryId": "28" # Science & Technology
+            },
+            "status": {
+                "privacyStatus": "public",
+                "selfDeclaredMadeForKids": False
+            }
+        }
+        
+        # 4. Execute Upload (Resumable Upload for stability)
+        media = MediaFileUpload(video_path, mimetype="video/mp4", resumable=True)
+        request = youtube.videos().insert(
+            part="snippet,status",
+            body=body,
+            media_body=media
+        )
+        
+        response = None
+        while response is None:
+            status, response = request.next_chunk()
+            if status:
+                print(f"⏳ Upload progress: {int(status.progress() * 100)}%")
+                
+        video_id = response['id']
+        print(f"✅ Video uploaded successfully! URL: https://www.youtube.com/watch?v={video_id}")
+        
+        # 5. Upload Custom Thumbnail (Requires YouTube Partner Program/Verification)
+        try:
+            print("🖼️ Uploading custom thumbnail...")
+            youtube.thumbnails().set(
+                videoId=video_id,
+                media_body=MediaFileUpload(thumbnail_path, mimetype="image/jpeg")
+            ).execute()
+            print("✅ Thumbnail uploaded.")
+        except Exception as thumb_e:
+            print(f"⚠️ Thumbnail upload skipped (Channel may not be verified for custom thumbnails): {thumb_e}")
+            
+        return video_id
+        
+    except Exception as e:
+        print(f"❌ YouTube upload failed: {e}")
+        return None
 
-# =================MAIN EXECUTION=================
+# ================= MAIN EXECUTION =================
 
 def run_channel(channel_arg):
     channel = CHANNELS.get(channel_arg)
@@ -157,9 +225,9 @@ def run_channel(channel_arg):
     bg_image = fetch_background_image(channel['topic'])
     
     # 3. Generate Thumbnail
-    generate_thumbnail(bg_image, news_title)
+    thumbnail_path = generate_thumbnail(bg_image, news_title)
     
-    # 4. Generate Script (Fixed API)
+    # 4. Generate Script
     script = generate_script(news_title, channel['name'])
     
     # 5. Generate Voiceover
@@ -168,13 +236,11 @@ def run_channel(channel_arg):
     # 6. Render Video
     video_file = render_video(bg_image, audio_file)
     
-    # 7. Upload
-    upload_to_youtube(video_file, news_title)
+    # 7. Upload to YouTube (Video + Thumbnail)
+    upload_to_youtube(video_file, news_title, thumbnail_path)
     
     print("✅ Done.\n")
 
 if __name__ == "__main__":
-    # Allow running without arguments (defaults to FutureIntelligence)
-    # or pass a specific channel key if you add more later.
     target_channel = sys.argv[1] if len(sys.argv) > 1 else "FutureIntelligence"
     run_channel(target_channel)
