@@ -19,7 +19,7 @@ from googleapiclient.http import MediaFileUpload
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 genai.configure(api_key=GEMINI_API_KEY)
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-1.5-flash"
 
 # Channel Configuration (Only 1 Channel now)
 CHANNELS = {
