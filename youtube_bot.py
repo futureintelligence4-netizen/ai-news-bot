@@ -19,9 +19,8 @@ from googleapiclient.http import MediaFileUpload
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 genai.configure(api_key=GEMINI_API_KEY)
-GEMINI_MODEL = "gemini-1.5-flash-latest"
+GEMINI_MODEL = "gemini-2.0-flash" # Changed back to 2.0
 
-# Channel Configuration (Only 1 Channel now)
 CHANNELS = {
     "FutureIntelligence": {
         "name": "Future Intelligence News",
@@ -51,7 +50,8 @@ def fetch_latest_news(topic):
 
 def fetch_background_image(query):
     print("🖼️ Fetching relevant background images...")
-    img_url = "https://loremflickr.com/1280/720/artificialintelligence,technology"
+    # Changed to 1080x1920 (Vertical for YouTube Shorts)
+    img_url = "https://loremflickr.com/1080/1920/artificialintelligence,technology"
     try:
         response = requests.get(img_url, stream=True, timeout=10)
         response.raise_for_status()
@@ -60,7 +60,7 @@ def fetch_background_image(query):
         return "background.jpg"
     except Exception as e:
         print(f"⚠️ Image fetch failed: {e}. Generating solid color background.")
-        img = Image.new('RGB', (1280, 720), color=(10, 20, 40))
+        img = Image.new('RGB', (1080, 1920), color=(10, 20, 40))
         img.save("background.jpg")
         return "background.jpg"
 
@@ -73,14 +73,15 @@ def generate_thumbnail(image_path, news_title, channel_name):
         img.paste(overlay, (0, 0), overlay)
         
         try:
-            font_large = ImageFont.truetype("arial.ttf", 50)
-            font_small = ImageFont.truetype("arial.ttf", 30)
+            font_large = ImageFont.truetype("arial.ttf", 70)
+            font_small = ImageFont.truetype("arial.ttf", 40)
         except:
             font_large = ImageFont.load_default()
             font_small = ImageFont.load_default()
 
-        draw.text((50, 250), channel_name.upper(), fill="red", font=font_large)
-        draw.text((50, 320), news_title[:60] + "...", fill="white", font=font_small)
+        # Adjusted text position for vertical video
+        draw.text((50, 800), channel_name.upper(), fill="red", font=font_large)
+        draw.text((50, 900), news_title[:50] + "...", fill="white", font=font_small)
         
         img.save("thumbnail.jpg")
         return "thumbnail.jpg"
@@ -108,7 +109,8 @@ def generate_script(news_title, channel_name):
                 time.sleep(3)
             else:
                 print("❌ All API retries exhausted. Using fallback script.")
-                return f"Breaking news today. {news_title}. We will continue to monitor this developing story."
+                # Made the fallback script much longer so the video is 1 minute
+                return f"Welcome to Future Intelligence News. Our top story today: {news_title}. Experts are weighing in on what this means for the tech industry and global markets. Analysts suggest this development could lead to significant shifts in artificial intelligence applications and business strategies. Industry leaders are already responding to the news, pointing out both the challenges and opportunities that lie ahead. We will continue to monitor this breaking story and bring you more updates as they become available. Stay tuned for more in-depth coverage of the technology shaping our future."
 
 def generate_voiceover(script_text, language="en"):
     print("🎙️ Generating voiceover...")
@@ -128,16 +130,12 @@ def render_video(image_path, audio_path):
 def upload_to_youtube(video_path, title, thumbnail_path):
     print("📤 Uploading to YouTube...")
     try:
-        # 1. Get the Token from GitHub Secrets
         token_json = os.getenv("YOUTUBE_TOKEN")
-        
         if not token_json:
             print("❌ YOUTUBE_TOKEN not found in secrets! Skipping upload.")
             return None
             
         token_data = json.loads(token_json)
-        
-        # 2. Initialize Credentials
         creds = Credentials(
             token=None,
             refresh_token=token_data.get("refresh_token"),
@@ -147,16 +145,13 @@ def upload_to_youtube(video_path, title, thumbnail_path):
             scopes=["https://www.googleapis.com/auth/youtube.upload"]
         )
         creds.refresh(Request())
-        
-        # 3. Build YouTube API Service
         youtube = build("youtube", "v3", credentials=creds)
         
-        # 4. Prepare Upload Body
         body = {
             "snippet": {
                 "title": title[:100],
-                "description": f"Breaking News: {title}\n\n#News #Trending #AI",
-                "tags": ["News", "Trending", "AI", "FutureIntelligence"],
+                "description": f"Breaking News: {title}\n\n#Shorts #News #Trending #AI", # Added #Shorts hashtag
+                "tags": ["News", "Trending", "AI", "FutureIntelligence", "Shorts"],
                 "categoryId": "28"
             },
             "status": {
@@ -165,7 +160,6 @@ def upload_to_youtube(video_path, title, thumbnail_path):
             }
         }
         
-        # 5. Execute Upload
         media = MediaFileUpload(video_path, mimetype="video/mp4", resumable=True)
         request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
         
@@ -178,7 +172,6 @@ def upload_to_youtube(video_path, title, thumbnail_path):
         video_id = response['id']
         print(f"✅ Video uploaded successfully! URL: https://www.youtube.com/watch?v={video_id}")
         
-        # 6. Upload Custom Thumbnail
         try:
             print("🖼️ Uploading custom thumbnail...")
             youtube.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(thumbnail_path, mimetype="image/jpeg")).execute()
