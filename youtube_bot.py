@@ -19,7 +19,7 @@ from googleapiclient.http import MediaFileUpload
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 genai.configure(api_key=GEMINI_API_KEY)
-GEMINI_MODEL = "gemini-2.0-flash" # Changed back to 2.0
+GEMINI_MODEL = "gemini-pro"
 
 CHANNELS = {
     "FutureIntelligence": {
@@ -51,7 +51,7 @@ def fetch_latest_news(topic):
 def fetch_background_image(query):
     print("🖼️ Fetching relevant background images...")
     # Changed to 1080x1920 (Vertical for YouTube Shorts)
-    img_url = "https://loremflickr.com/1080/1920/artificialintelligence,technology"
+    img_url = "https://picsum.photos/1080/1920"
     try:
         response = requests.get(img_url, stream=True, timeout=10)
         response.raise_for_status()
