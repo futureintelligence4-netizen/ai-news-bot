@@ -4,7 +4,8 @@ import time
 import json
 import requests
 import xml.etree.ElementTree as ET
-from gtts import gTTS
+import asyncio
+import edge_tts
 from moviepy.editor import ImageClip, AudioFileClip
 from PIL import Image, ImageDraw, ImageFont
 
@@ -112,10 +113,18 @@ def generate_script(news_title, channel_name):
                 # Made the fallback script much longer so the video is 1 minute
                 return f"Welcome to Future Intelligence News. Our top story today: {news_title}. Experts are weighing in on what this means for the tech industry and global markets. Analysts suggest this development could lead to significant shifts in artificial intelligence applications and business strategies. Industry leaders are already responding to the news, pointing out both the challenges and opportunities that lie ahead. We will continue to monitor this breaking story and bring you more updates as they become available. Stay tuned for more in-depth coverage of the technology shaping our future."
 
+
+
 def generate_voiceover(script_text, language="en"):
-    print("🎙️ Generating voiceover...")
-    tts = gTTS(text=script_text, lang=language, slow=False)
-    tts.save("voiceover.mp3")
+    print("🎙️ Generating fast, professional voiceover...")
+    
+    # Choose a male US voice (GuyNeural) or female (AriaNeural)
+    # rate="+25%" makes it talk 25% faster!
+    async def create_audio():
+        communicate = edge_tts.Communicate(text=script_text, voice="en-US-GuyNeural", rate="+25%")
+        await communicate.save("voiceover.mp3")
+        
+    asyncio.run(create_audio())
     return "voiceover.mp3"
 
 def render_video(image_path, audio_path):
