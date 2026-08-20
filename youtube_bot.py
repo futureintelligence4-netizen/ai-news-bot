@@ -2,9 +2,9 @@ import os
 import sys
 import time
 import json
+import asyncio
 import requests
 import xml.etree.ElementTree as ET
-import asyncio
 import edge_tts
 from moviepy.editor import ImageClip, AudioFileClip
 from PIL import Image, ImageDraw, ImageFont
@@ -20,7 +20,7 @@ from googleapiclient.http import MediaFileUpload
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 genai.configure(api_key=GEMINI_API_KEY)
-GEMINI_MODEL = "gemini-pro"
+GEMINI_MODEL = "gemini-pro" # Stable model that won't give 404 errors
 
 CHANNELS = {
     "FutureIntelligence": {
@@ -51,7 +51,7 @@ def fetch_latest_news(topic):
 
 def fetch_background_image(query):
     print("🖼️ Fetching relevant background images...")
-    # Changed to 1080x1920 (Vertical for YouTube Shorts)
+    # Using Picsum (much more reliable than LoremFlickr)
     img_url = "https://picsum.photos/1080/1920"
     try:
         response = requests.get(img_url, stream=True, timeout=10)
@@ -80,7 +80,6 @@ def generate_thumbnail(image_path, news_title, channel_name):
             font_large = ImageFont.load_default()
             font_small = ImageFont.load_default()
 
-        # Adjusted text position for vertical video
         draw.text((50, 800), channel_name.upper(), fill="red", font=font_large)
         draw.text((50, 900), news_title[:50] + "...", fill="white", font=font_small)
         
@@ -110,16 +109,12 @@ def generate_script(news_title, channel_name):
                 time.sleep(3)
             else:
                 print("❌ All API retries exhausted. Using fallback script.")
-                # Made the fallback script much longer so the video is 1 minute
                 return f"Welcome to Future Intelligence News. Our top story today: {news_title}. Experts are weighing in on what this means for the tech industry and global markets. Analysts suggest this development could lead to significant shifts in artificial intelligence applications and business strategies. Industry leaders are already responding to the news, pointing out both the challenges and opportunities that lie ahead. We will continue to monitor this breaking story and bring you more updates as they become available. Stay tuned for more in-depth coverage of the technology shaping our future."
-
-
 
 def generate_voiceover(script_text, language="en"):
     print("🎙️ Generating fast, professional voiceover...")
     
-    # Choose a male US voice (GuyNeural) or female (AriaNeural)
-    # rate="+25%" makes it talk 25% faster!
+    # Uses Microsoft Edge Neural Voice, talks 25% faster
     async def create_audio():
         communicate = edge_tts.Communicate(text=script_text, voice="en-US-GuyNeural", rate="+25%")
         await communicate.save("voiceover.mp3")
@@ -159,7 +154,7 @@ def upload_to_youtube(video_path, title, thumbnail_path):
         body = {
             "snippet": {
                 "title": title[:100],
-                "description": f"Breaking News: {title}\n\n#Shorts #News #Trending #AI", # Added #Shorts hashtag
+                "description": f"Breaking News: {title}\n\n#Shorts #News #Trending #AI",
                 "tags": ["News", "Trending", "AI", "FutureIntelligence", "Shorts"],
                 "categoryId": "28"
             },
