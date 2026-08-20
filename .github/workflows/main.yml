@@ -18,7 +18,7 @@ jobs:
           
       - name: Install dependencies
         run: |
-          pip install gTTS google-generativeai moviepy==1.0.3 requests python-dotenv feedparser pytz pillow imageio-ffmpeg google-api-python-client google-auth-oauthlib
+          pip install edge-tts gTTS google-generativeai moviepy==1.0.3 requests python-dotenv feedparser pytz pillow imageio-ffmpeg google-api-python-client google-auth-oauthlib
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick fontconfig fonts-noto-core
           sudo sed -i 's/rights="none"/rights="read|write"/g' /etc/ImageMagick-6/policy.xml
