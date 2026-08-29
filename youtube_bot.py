@@ -112,11 +112,11 @@ def generate_script(news_title, channel_name):
                 return f"Welcome to Future Intelligence News. Our top story today: {news_title}. Experts are weighing in on what this means for the tech industry and global markets. Analysts suggest this development could lead to significant shifts in artificial intelligence applications and business strategies. Industry leaders are already responding to the news, pointing out both the challenges and opportunities that lie ahead. We will continue to monitor this breaking story and bring you more updates as they become available. Stay tuned for more in-depth coverage of the technology shaping our future."
 
 def generate_voiceover(script_text, language="en"):
-    print("🎙️ Generating fast, professional voiceover...")
+    print("🎙️ Generating professional voiceover...")
     
-    # Uses Microsoft Edge Neural Voice, talks 25% faster
+    # Uses Microsoft Edge Neural Voice at natural pace
     async def create_audio():
-        communicate = edge_tts.Communicate(text=script_text, voice="en-US-GuyNeural", rate="+25%")
+        communicate = edge_tts.Communicate(text=script_text, voice="en-US-GuyNeural", rate="-5%")
         await communicate.save("voiceover.mp3")
         
     asyncio.run(create_audio())
