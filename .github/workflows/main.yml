@@ -1,9 +1,9 @@
-name: Future Intelligence News Bot
+name: Daily AI News Shorts
 
 on:
   schedule:
-    - cron: '0 8 * * 3'   # Every Wednesday at 8:00 AM UTC
-  workflow_dispatch:       # Allows you to run it manually from the Actions tab
+    - cron: '0 8 * * 1-5'   # Mon-Fri at 8:00 AM UTC (1:30 PM IST)
+  workflow_dispatch:
 
 jobs:
   run_bot:
@@ -28,3 +28,11 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           YOUTUBE_TOKEN: ${{ secrets.YOUTUBE_TOKEN }}
         run: python youtube_bot.py
+
+      - name: Commit state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add *.jpg *.mp4 *.mp3 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "Auto: cleanup generated files (run ${{ github.run_number }})"
+          git push
