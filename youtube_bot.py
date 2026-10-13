@@ -119,8 +119,22 @@ def generate_voiceover(script_text, language="en"):
         communicate = edge_tts.Communicate(text=script_text, voice="en-US-GuyNeural", rate="-5%")
         await communicate.save("voiceover.mp3")
         
-    asyncio.run(create_audio())
-    return "voiceover.mp3"
+    try:
+        asyncio.run(create_audio())
+        if os.path.getsize("voiceover.mp3") > 1024:
+            return "voiceover.mp3"
+        raise RuntimeError("edge-tts produced an empty/undersized file")
+    except Exception as exc:
+        # Microsoft started answering the Edge neural-TTS websocket with
+        # HTTP 403 (WSServerHandshakeError) on GitHub Actions IPs, which
+        # killed run #120 outright. Fall back to Google TTS so a blocked
+        # socket costs a voice-quality downgrade instead of the whole video.
+        print("⚠️ edge-tts failed (%s: %s)" % (type(exc).__name__, str(exc)[:200]))
+        print("   -> falling back to gTTS so the run still posts")
+        from gtts import gTTS
+        gTTS(text=script_text, lang=language or "en").save("voiceover.mp3")
+        print("🎙️ Voiceover generated via gTTS fallback")
+        return "voiceover.mp3"
 
 def render_video(image_path, audio_path):
     print("🎬 Rendering video...")
